@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict
 from typing import Any
 
 import dlt
 from dlt.common.schema.typing import TColumnSchema
+from dlt.common.storages.fsspec_filesystem import FileItemDict
 from dlt.extract.resource import DltResource
-from dlt.sources.filesystem import filesystem, read_csv_duckdb
+from dlt.sources.filesystem import filesystem
 
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
 from imdb_ducklake.datasets import DatasetSpec
 from imdb_ducklake.exceptions import IngestionError
 
 _NO_NULL_SENTINEL = "__IMDB_DUCKLAKE_NO_NULL_VALUE__"
+
+
+def _read_csv_duckdb_arrow(
+    items: Iterable[FileItemDict],
+    /,
+    *,
+    chunk_size: int,
+    **duckdb_options: Any,
+) -> Iterator[Any]:
+    """Stream CSV files as Arrow batches through DuckDB's current reader API."""
+    import duckdb
+
+    for item in items:
+        with item.open() as file_object:
+            relation = duckdb.from_csv_auto(file_object, **duckdb_options)
+            yield from relation.to_arrow_reader(batch_size=chunk_size)
+
+
+read_csv_duckdb_arrow = dlt.transformer()(_read_csv_duckdb_arrow)
 
 
 def build_ingestion_resources(
@@ -45,9 +65,8 @@ def _raw_resource(artifact: VerifiedArtifact, *, chunk_size: int) -> DltResource
         file_glob=artifact.path.name,
         files_per_page=1,
     ).with_name(f"files_{dataset.table_name}")
-    reader = files | read_csv_duckdb(
+    reader = files | read_csv_duckdb_arrow(
         chunk_size=chunk_size,
-        use_pyarrow=True,
         delimiter="\t",
         header=True,
         all_varchar=True,

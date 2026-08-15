@@ -76,3 +76,4 @@ def test_dlt_startup_failure_is_wrapped_with_catalog_context(tmp_path, monkeypat
 
     assert isinstance(raised.value.__cause__, RuntimeError)
     assert str(paths.catalog_path) in str(raised.value)
+    assert "RuntimeError: dlt unavailable" in str(raised.value)

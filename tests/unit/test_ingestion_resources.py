@@ -1,5 +1,6 @@
 import gzip
 import hashlib
+import warnings
 from datetime import UTC, datetime
 
 import pyarrow as pa
@@ -43,7 +44,9 @@ def test_raw_resource_preserves_headers_strings_and_null_literal(tmp_path) -> No
     artifact = _artifact(tmp_path, (("id1", "\\N"), ("id2", "")))
 
     raw_resource, metadata_resource = build_ingestion_resources((artifact,), chunk_size=1)
-    batches = list(raw_resource)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        batches = list(raw_resource)
     metadata = list(metadata_resource)
 
     assert all(isinstance(batch, pa.RecordBatch) for batch in batches)

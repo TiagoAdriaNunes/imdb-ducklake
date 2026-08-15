@@ -110,8 +110,9 @@ def ingest_snapshot(
     except IngestionError:
         raise
     except Exception as error:
+        detail = f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
         raise IngestionError(
-            f"dlt could not load IMDb snapshot into {build_paths.catalog_path}"
+            f"dlt could not load IMDb snapshot into {build_paths.catalog_path}: {detail}"
         ) from error
 
     logger.info(
