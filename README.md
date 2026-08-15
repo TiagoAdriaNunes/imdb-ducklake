@@ -1,5 +1,7 @@
 # IMDb DuckLake
 
+[![CI](https://github.com/TiagoAdriaNunes/imdb-ducklake/actions/workflows/ci.yml/badge.svg)](https://github.com/TiagoAdriaNunes/imdb-ducklake/actions/workflows/ci.yml)
+
 A reproducible local analytics lakehouse built from the official IMDb non-commercial datasets.
 
 The project uses:
@@ -10,7 +12,14 @@ The project uses:
 - **Shiny for Python** in a later phase for interactive exploration
 
 > IMDb permits these datasets for personal and non-commercial use. This repository contains code
-> and miniature synthetic fixtures only; it does not redistribute IMDb data.
+> and miniature synthetic fixtures only. It never redistributes IMDb source archives, extracted
+> source rows, generated catalogs, or Parquet data.
+
+## Architecture
+
+The end-to-end data flow, package dependency rules, failure boundaries, and dbt lineage are
+documented in [`docs/architecture.md`](docs/architecture.md). Architectural decisions are recorded
+under [`docs/adr/`](docs/adr/README.md).
 
 ## Modules
 
@@ -45,6 +54,9 @@ uv run imdb-lakehouse --help
 uv run ruff check .
 uv run pytest
 ```
+
+Ordinary CI excludes tests marked `smoke`, because those tests require the complete local IMDb
+download. Run them deliberately with `uv run pytest -m smoke` after acquiring all seven archives.
 
 ## Download IMDb datasets
 
@@ -113,6 +125,24 @@ When no current build exists, the command automatically validates the sole stage
 It prints the required-relation count and row count for each mart. If multiple staged builds exist,
 select one explicitly with `--build-id`; `--data-dir` uses the same override as the other commands.
 
+## Exit codes
+
+Expected failures use stable, category-specific process exit codes so local scripts and schedulers
+can distinguish the failed stage:
+
+| Code | Failure category |
+| ---: | --- |
+| 10 | Configuration |
+| 11 | Acquisition or retained-archive verification |
+| 12 | dlt ingestion |
+| 13 | dbt transformation |
+| 14 | Post-build validation |
+| 15 | Promotion of a validated build |
+| 16 | Other lakehouse lifecycle operations, including locks and free-space gates |
+
+Typer continues to own command-line parsing errors. An otherwise expected application error that
+does not yet have a more specific subtype exits with code 1.
+
 ## Ingest a raw snapshot
 
 Load all seven retained archives into a new isolated DuckLake build:
@@ -161,6 +191,53 @@ uv run imdb-lakehouse transform --build-id 20260815T123000Z-abc123
 Use `--data-dir` when ingestion used a custom data directory. A successful transformation remains
 staged for inspection; the full `build` command performs its own isolated end-to-end run before
 promotion.
+
+## Query the analytical marts
+
+Attach a promoted catalog read-only from DuckDB. Replace the two paths when `--data-dir` was used:
+
+```sql
+LOAD ducklake;
+ATTACH 'ducklake:D:/path/to/imdb-ducklake/data/ducklake/current/catalog.duckdb'
+    AS imdb_lake (
+        DATA_PATH 'D:/path/to/imdb-ducklake/data/ducklake/current/storage',
+        OVERRIDE_DATA_PATH true,
+        READ_ONLY
+    );
+```
+
+Search well-rated titles without reading raw tables:
+
+```sql
+SELECT tconst, primary_title, start_year, average_rating, num_votes, genres
+FROM imdb_lake.marts.mart_title_search
+WHERE primary_title ILIKE '%matrix%'
+ORDER BY num_votes DESC NULLS LAST
+LIMIT 25;
+```
+
+Summarize a genre over time:
+
+```sql
+SELECT start_year, title_count, rated_title_count, average_rating, total_votes
+FROM imdb_lake.marts.mart_genre_year_summary
+WHERE genre = 'Documentary' AND start_year BETWEEN 2000 AND 2025
+ORDER BY start_year;
+```
+
+Inspect a person's filmography or navigate a series:
+
+```sql
+SELECT primary_name, primary_title, start_year, category, average_rating
+FROM imdb_lake.marts.mart_person_filmography
+WHERE nconst = 'nm0000206'
+ORDER BY start_year DESC NULLS LAST, ordering;
+
+SELECT series_title, season_number, episode_number, episode_title, average_rating
+FROM imdb_lake.marts.mart_series_episodes
+WHERE series_tconst = 'tt0944947'
+ORDER BY season_number NULLS LAST, episode_number NULLS LAST;
+```
 
 ## Data source
 

@@ -46,7 +46,7 @@ jobs:
         run: uv run dbt parse --project-dir dbt --profiles-dir dbt --no-partial-parse
 
       - name: Test
-        run: uv run pytest --cov=imdb_ducklake --cov-fail-under=85
+        run: uv run pytest -m "not smoke" --cov=imdb_ducklake --cov-fail-under=85
 
       - name: Build package
         run: uv build
