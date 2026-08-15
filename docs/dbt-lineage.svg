@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="760" viewBox="0 0 1440 760" role="img" aria-labelledby="title desc">
+  <title id="title">IMDb DuckLake dbt lineage</title>
+  <desc id="desc">Raw IMDb sources flow through staging views, intermediate dimensions, facts, bridges and rollups, then into four analytical marts.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#172033"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#7dd3fc"/>
+    </marker>
+    <style>
+      .heading { font: 700 22px ui-sans-serif, system-ui, sans-serif; fill: #f8fafc; }
+      .kind { font: 600 13px ui-sans-serif, system-ui, sans-serif; letter-spacing: 1.4px; fill: #94a3b8; }
+      .model { font: 14px ui-monospace, SFMono-Regular, Consolas, monospace; fill: #e2e8f0; }
+      .note { font: 13px ui-sans-serif, system-ui, sans-serif; fill: #a5b4fc; }
+      .stage { stroke-width: 1.5; rx: 16; filter: url(#shadow); }
+      .flow { fill: none; stroke: #7dd3fc; stroke-width: 3; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1440" height="760" fill="url(#background)"/>
+  <text x="56" y="52" class="heading">IMDb DuckLake dbt lineage</text>
+  <text x="56" y="78" class="note">23 dbt models · typed staging → reusable intermediate layer → four Shiny-facing marts</text>
+
+  <path class="flow" d="M342 390 C375 390, 390 390, 420 390"/>
+  <path class="flow" d="M692 390 C725 390, 740 390, 770 390"/>
+  <path class="flow" d="M1112 390 C1145 390, 1160 390, 1190 390"/>
+
+  <rect x="42" y="112" width="300" height="570" class="stage" fill="#172554" stroke="#3b82f6"/>
+  <text x="68" y="148" class="kind">DUCKLAKE RAW SOURCES</text>
+  <text x="68" y="182" class="model">raw.ingestion_files</text>
+  <text x="68" y="215" class="model">raw.name_basics</text>
+  <text x="68" y="248" class="model">raw.title_akas</text>
+  <text x="68" y="281" class="model">raw.title_basics</text>
+  <text x="68" y="314" class="model">raw.title_crew</text>
+  <text x="68" y="347" class="model">raw.title_episode</text>
+  <text x="68" y="380" class="model">raw.title_principals</text>
+  <text x="68" y="413" class="model">raw.title_ratings</text>
+  <line x1="68" y1="444" x2="316" y2="444" stroke="#3b82f6" stroke-opacity="0.5"/>
+  <text x="68" y="477" class="note">Lossless VARCHAR values</text>
+  <text x="68" y="501" class="note">and _dlt_load_id lineage</text>
+
+  <rect x="420" y="112" width="272" height="570" class="stage" fill="#134e4a" stroke="#2dd4bf"/>
+  <text x="446" y="148" class="kind">STAGING VIEWS</text>
+  <text x="446" y="182" class="model">stg_imdb__ingestion_files</text>
+  <text x="446" y="215" class="model">stg_imdb__name_basics</text>
+  <text x="446" y="248" class="model">stg_imdb__title_akas</text>
+  <text x="446" y="281" class="model">stg_imdb__title_basics</text>
+  <text x="446" y="314" class="model">stg_imdb__title_crew</text>
+  <text x="446" y="347" class="model">stg_imdb__title_episode</text>
+  <text x="446" y="380" class="model">stg_imdb__title_principals</text>
+  <text x="446" y="413" class="model">stg_imdb__title_ratings</text>
+  <line x1="446" y1="444" x2="666" y2="444" stroke="#2dd4bf" stroke-opacity="0.5"/>
+  <text x="446" y="477" class="note">NULL normalization, typing,</text>
+  <text x="446" y="501" class="note">arrays and JSON parsing</text>
+
+  <rect x="770" y="112" width="342" height="570" class="stage" fill="#3b1d4a" stroke="#c084fc"/>
+  <text x="796" y="148" class="kind">INTERMEDIATE VIEWS</text>
+  <text x="796" y="182" class="model">dim_titles</text>
+  <text x="796" y="215" class="model">dim_people</text>
+  <text x="796" y="248" class="model">fct_title_ratings</text>
+  <text x="796" y="281" class="model">fct_episodes</text>
+  <text x="796" y="314" class="model">bridge_title_genres</text>
+  <text x="796" y="347" class="model">bridge_title_credits</text>
+  <text x="796" y="380" class="model">bridge_title_crew</text>
+  <text x="796" y="413" class="model">bridge_title_akas</text>
+  <text x="796" y="446" class="model">int_title_genre_lists</text>
+  <text x="796" y="479" class="model">int_title_director_lists</text>
+  <text x="796" y="512" class="model">int_title_principal_cast_lists</text>
+  <line x1="796" y1="543" x2="1086" y2="543" stroke="#c084fc" stroke-opacity="0.5"/>
+  <text x="796" y="576" class="note">Stable dimensions, facts, bridges</text>
+  <text x="796" y="600" class="note">and bounded list rollups</text>
+
+  <rect x="1190" y="112" width="208" height="570" class="stage" fill="#4a2c0a" stroke="#f59e0b"/>
+  <text x="1216" y="148" class="kind">MART TABLES</text>
+  <text x="1216" y="195" class="model">mart_title_search</text>
+  <text x="1216" y="243" class="model">mart_genre_year_</text>
+  <text x="1216" y="266" class="model">summary</text>
+  <text x="1216" y="314" class="model">mart_person_</text>
+  <text x="1216" y="337" class="model">filmography</text>
+  <text x="1216" y="385" class="model">mart_series_</text>
+  <text x="1216" y="408" class="model">episodes</text>
+  <line x1="1216" y1="444" x2="1372" y2="444" stroke="#f59e0b" stroke-opacity="0.5"/>
+  <text x="1216" y="477" class="note">Materialized query</text>
+  <text x="1216" y="501" class="note">contracts for UI use</text>
+
+  <text x="720" y="726" text-anchor="middle" class="note">Every mart is validated through a fresh-process, read-only DuckLake attachment before promotion.</text>
+</svg>

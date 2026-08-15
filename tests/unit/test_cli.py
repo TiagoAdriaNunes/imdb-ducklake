@@ -1,11 +1,21 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from imdb_ducklake import cli
 from imdb_ducklake.config import Settings
-from imdb_ducklake.exceptions import AcquisitionError
+from imdb_ducklake.exceptions import (
+    AcquisitionError,
+    ConfigurationError,
+    ImdbLakehouseError,
+    IngestionError,
+    LifecycleError,
+    PromotionError,
+    TransformationError,
+    ValidationError,
+)
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
 
 runner = CliRunner()
@@ -39,7 +49,7 @@ def test_download_command_maps_domain_error_to_exit_code(monkeypatch) -> None:
 
     result = runner.invoke(cli.app, ["download", "--force"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == cli.ExitCode.ACQUISITION_ERROR
     assert "Error: source unavailable" in result.output
 
 
@@ -106,7 +116,7 @@ def test_ingest_command_maps_archive_verification_error(monkeypatch) -> None:
 
     result = runner.invoke(cli.app, ["ingest"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == cli.ExitCode.ACQUISITION_ERROR
     assert "Error: retained archive is invalid" in result.output
 
 
@@ -122,7 +132,7 @@ def test_ingest_preserves_existing_staged_build_without_explicit_replace(
 
     result = runner.invoke(cli.app, ["ingest"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == cli.ExitCode.LIFECYCLE_ERROR
     assert "pass --replace-staged" in result.output
     assert staged.temporary_dir.is_dir()
 
@@ -220,3 +230,22 @@ def test_main_invokes_typer_application(monkeypatch) -> None:
     cli.main()
 
     assert called
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (ConfigurationError("configuration"), cli.ExitCode.CONFIGURATION_ERROR),
+        (AcquisitionError("acquisition"), cli.ExitCode.ACQUISITION_ERROR),
+        (IngestionError("ingestion"), cli.ExitCode.INGESTION_ERROR),
+        (TransformationError("transformation"), cli.ExitCode.TRANSFORMATION_ERROR),
+        (ValidationError("validation"), cli.ExitCode.VALIDATION_ERROR),
+        (PromotionError("promotion"), cli.ExitCode.PROMOTION_ERROR),
+        (LifecycleError("lifecycle"), cli.ExitCode.LIFECYCLE_ERROR),
+        (ImdbLakehouseError("other"), cli.ExitCode.UNEXPECTED_APPLICATION_ERROR),
+    ],
+)
+def test_expected_failures_have_stable_exit_codes(
+    error: ImdbLakehouseError, expected: cli.ExitCode
+) -> None:
+    assert cli._exit_code_for(error) is expected

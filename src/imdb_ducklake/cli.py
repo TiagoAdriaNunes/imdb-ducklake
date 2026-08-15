@@ -1,10 +1,11 @@
 """Command-line composition root for the IMDb DuckLake application."""
 
+from enum import IntEnum
 from os import environ
 from os import name as os_name
 from pathlib import Path
 from sys import executable as python_executable
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import httpx
 import typer
@@ -13,7 +14,16 @@ from imdb_ducklake.acquisition.downloader import Downloader, load_verified_artif
 from imdb_ducklake.application.build import build_lakehouse
 from imdb_ducklake.config import Settings
 from imdb_ducklake.datasets import DATASETS
-from imdb_ducklake.exceptions import ImdbLakehouseError, LifecycleError
+from imdb_ducklake.exceptions import (
+    AcquisitionError,
+    ConfigurationError,
+    ImdbLakehouseError,
+    IngestionError,
+    LifecycleError,
+    PromotionError,
+    TransformationError,
+    ValidationError,
+)
 from imdb_ducklake.ingestion.pipeline import ingest_snapshot
 from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
@@ -33,6 +43,19 @@ app = typer.Typer(
     help="Build and maintain a local IMDb analytics lakehouse.",
     no_args_is_help=True,
 )
+
+
+class ExitCode(IntEnum):
+    """Stable process exit codes for expected application failures."""
+
+    UNEXPECTED_APPLICATION_ERROR = 1
+    CONFIGURATION_ERROR = 10
+    ACQUISITION_ERROR = 11
+    INGESTION_ERROR = 12
+    TRANSFORMATION_ERROR = 13
+    VALIDATION_ERROR = 14
+    PROMOTION_ERROR = 15
+    LIFECYCLE_ERROR = 16
 
 
 @app.callback()
@@ -83,8 +106,7 @@ def build_command(
             f"after validating {result.validation.relation_count} relations."
         )
     except ImdbLakehouseError as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(code=1) from error
+        _exit_with_error(error)
 
 
 @app.command("download")
@@ -122,8 +144,7 @@ def download_command(
         total_bytes = sum(artifact.manifest_entry.size_bytes for artifact in artifacts)
         typer.echo(f"Verified {len(artifacts)} archives ({total_bytes:,} bytes).")
     except ImdbLakehouseError as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(code=1) from error
+        _exit_with_error(error)
 
 
 @app.command("ingest")
@@ -179,8 +200,7 @@ def ingest_command(
         )
         typer.echo(f"Catalog: {result.catalog_path}")
     except ImdbLakehouseError as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(code=1) from error
+        _exit_with_error(error)
 
 
 @app.command("transform")
@@ -218,8 +238,7 @@ def transform_command(
         typer.echo(result.stdout.rstrip())
         typer.echo(f"Transformed and tested build {paths.build_id}; it remains unpromoted.")
     except ImdbLakehouseError as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(code=1) from error
+        _exit_with_error(error)
 
 
 @app.command("validate")
@@ -273,8 +292,7 @@ def validate_command(
         for relation, row_count in sorted(result.mart_row_counts.items()):
             typer.echo(f"  marts.{relation}: {row_count:,} rows")
     except ImdbLakehouseError as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(code=1) from error
+        _exit_with_error(error)
 
 
 def main() -> None:
@@ -284,3 +302,28 @@ def main() -> None:
 
 def _dbt_executable() -> Path:
     return Path(python_executable).with_name("dbt.exe" if os_name == "nt" else "dbt")
+
+
+def _exit_code_for(error: ImdbLakehouseError) -> ExitCode:
+    """Map an expected domain failure to its stable process exit code."""
+    if isinstance(error, ConfigurationError):
+        return ExitCode.CONFIGURATION_ERROR
+    if isinstance(error, AcquisitionError):
+        return ExitCode.ACQUISITION_ERROR
+    if isinstance(error, IngestionError):
+        return ExitCode.INGESTION_ERROR
+    if isinstance(error, TransformationError):
+        return ExitCode.TRANSFORMATION_ERROR
+    if isinstance(error, ValidationError):
+        return ExitCode.VALIDATION_ERROR
+    if isinstance(error, PromotionError):
+        return ExitCode.PROMOTION_ERROR
+    if isinstance(error, LifecycleError):
+        return ExitCode.LIFECYCLE_ERROR
+    return ExitCode.UNEXPECTED_APPLICATION_ERROR
+
+
+def _exit_with_error(error: ImdbLakehouseError) -> NoReturn:
+    """Render an expected failure and terminate with its category code."""
+    typer.echo(f"Error: {error}", err=True)
+    raise typer.Exit(code=int(_exit_code_for(error))) from error
