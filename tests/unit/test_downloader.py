@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from imdb_ducklake.acquisition.downloader import Downloader
+from imdb_ducklake.acquisition.downloader import Downloader, load_verified_artifacts
 from imdb_ducklake.acquisition.manifest import load_manifest
 from imdb_ducklake.datasets import DatasetSpec
 from imdb_ducklake.exceptions import AcquisitionError
@@ -87,6 +87,33 @@ def test_reuses_archive_when_manifest_and_digest_match(tmp_path) -> None:
 
     assert requests == 1
     assert second[0].manifest_entry == first[0].manifest_entry
+
+    retained = load_verified_artifacts(
+        [SPEC],
+        raw_dir=raw_dir,
+        manifest_path=manifest_path,
+    )
+    assert retained == first
+
+
+def test_retained_artifacts_require_manifest_and_matching_checksum(tmp_path) -> None:
+    raw_dir, manifest_path = _paths(tmp_path)
+    with pytest.raises(AcquisitionError, match="no verified entry"):
+        load_verified_artifacts([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+
+    body = _archive()
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, stream=httpx.ByteStream(body))
+        )
+    ) as client:
+        Downloader(client, clock=lambda: NOW).download_all(
+            [SPEC], raw_dir=raw_dir, manifest_path=manifest_path
+        )
+    (raw_dir / SPEC.file_name).write_bytes(body + b"corrupt")
+
+    with pytest.raises(AcquisitionError, match="Checksum does not match"):
+        load_verified_artifacts([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
 
 
 def test_retries_transient_server_error(tmp_path) -> None:

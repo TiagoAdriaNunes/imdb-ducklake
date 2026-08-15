@@ -9,6 +9,8 @@ from imdb_ducklake.lakehouse.lifecycle import (
     ensure_free_space,
     initialize_build,
     promote_build,
+    prune_obsolete_builds,
+    recover_interrupted_promotion,
     temporary_build,
 )
 
@@ -21,5 +23,7 @@ __all__ = [
     "ensure_free_space",
     "initialize_build",
     "promote_build",
+    "prune_obsolete_builds",
+    "recover_interrupted_promotion",
     "temporary_build",
 ]

@@ -22,8 +22,10 @@ The project uses:
   sources, raw tables, and expected headers.
 - [`acquisition/`](src/imdb_ducklake/acquisition/) downloads, resumes, verifies, and records source
   archives without depending on dlt or dbt.
+- [`ingestion/`](src/imdb_ducklake/ingestion/) defines explicit lossless dlt resources and loads a
+  complete verified snapshot into an isolated local DuckLake build.
 - [`lakehouse/`](src/imdb_ducklake/lakehouse/) owns isolated build paths, locking, free-space
-  validation, failure cleanup, and safe promotion.
+  validation, failure cleanup, crash recovery, retention pruning, and safe promotion.
 - [`exceptions.py`](src/imdb_ducklake/exceptions.py) and
   [`observability.py`](src/imdb_ducklake/observability.py) provide shared error and logging
   conventions.
@@ -63,6 +65,25 @@ uv run imdb-lakehouse download --data-dir ./local-imdb-data
 
 By default, archives are written to `data/raw/` and their source metadata, byte sizes, SHA-256
 checksums, and acquisition batch IDs are recorded in `data/raw/manifest.json`.
+
+## Ingest a raw snapshot
+
+Load all seven retained archives into a new isolated DuckLake build:
+
+```powershell
+uv run imdb-lakehouse ingest
+```
+
+The command revalidates every archive against the manifest before loading it. It prints the build
+ID and catalog path, and leaves the result under `data/ducklake/builds/` for inspection. This
+stage-only command does not replace `data/ducklake/current/`; promotion belongs to the future full
+`build` command after dbt models and tests pass.
+
+Use the same data-directory override as the download command when the archives are elsewhere:
+
+```powershell
+uv run imdb-lakehouse ingest --data-dir ./local-imdb-data
+```
 
 ## Data source
 
