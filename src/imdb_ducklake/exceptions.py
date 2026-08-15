@@ -25,5 +25,9 @@ class ValidationError(ImdbLakehouseError):
     """Raised when the resulting lakehouse fails an acceptance check."""
 
 
-class PromotionError(ImdbLakehouseError):
+class LifecycleError(ImdbLakehouseError):
+    """Raised when build workspace, locking, or disk lifecycle operations fail."""
+
+
+class PromotionError(LifecycleError):
     """Raised when a validated build cannot become the current build."""

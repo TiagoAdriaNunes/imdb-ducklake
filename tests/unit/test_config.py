@@ -15,9 +15,11 @@ def test_finds_repository_root_from_nested_directory(tmp_path) -> None:
     assert find_repository_root(nested) == root.resolve()
 
 
-def test_repository_root_must_contain_project_metadata() -> None:
+def test_repository_root_must_contain_project_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(Path, "is_file", lambda _path: False)
+
     with pytest.raises(ConfigurationError, match=r"Could not find pyproject\.toml"):
-        find_repository_root(Path("Z:/path/that/does/not/exist"))
+        find_repository_root(Path.cwd())
 
 
 def test_settings_resolve_environment_values_from_root(tmp_path, monkeypatch) -> None:
