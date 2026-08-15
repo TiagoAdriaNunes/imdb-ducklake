@@ -6,6 +6,9 @@ imdb_ducklake:
       path: "{{ env_var('IMDB_DUCKLAKE_DBT_CONTROLLER', '../data/dbt/controller.duckdb') }}"
       schema: main
       threads: 1
+      settings:
+        threads: 2
+        preserve_insertion_order: false
       extensions:
         - ducklake
       attach:
