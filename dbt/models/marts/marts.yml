@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: mart_title_search
+    description: One search-ready row per title with ratings, genres, directors, and principal cast.
+    columns:
+      - {name: tconst, description: Title key., data_tests: [not_null, unique]}
+      - {name: primary_title, description: Searchable title text.}
+      - {name: average_rating, description: Average rating measure.}
+      - {name: num_votes, description: Vote-count measure.}
+      - {name: genres, description: Genre array.}
+      - {name: directors, description: Director name array.}
+      - {name: principal_cast, description: Principal cast name array.}
+      - {name: dlt_load_id, description: Raw title lineage., data_tests: [not_null]}
+  - name: mart_genre_year_summary
+    description: Title, rating, and vote summaries by year, title type, and genre.
+    columns:
+      - {name: start_year, description: Release year grouping.}
+      - {name: title_type, description: IMDb title-type grouping.}
+      - {name: genre, description: Genre grouping., data_tests: [not_null]}
+      - {name: title_count, description: Number of titles., data_tests: [not_null]}
+      - {name: rated_title_count, description: Number of rated titles., data_tests: [not_null]}
+      - {name: average_rating, description: Mean rating of rated titles.}
+      - {name: total_votes, description: Sum of title vote counts., data_tests: [not_null]}
+  - name: mart_person_filmography
+    description: Searchable ordered people-to-title credits with role and rating details.
+    columns:
+      - {name: nconst, description: Person key., data_tests: [not_null]}
+      - {name: primary_name, description: Person display name.}
+      - {name: tconst, description: Credited title key., data_tests: [not_null]}
+      - {name: ordering, description: Credit ordering., data_tests: [not_null]}
+      - {name: category, description: Credit category.}
+      - {name: average_rating, description: Optional title rating.}
+      - {name: dlt_load_id, description: Raw credit lineage., data_tests: [not_null]}
+  - name: mart_series_episodes
+    description: Series, season, and episode navigation with optional rating measures.
+    columns:
+      - {name: series_tconst, description: Parent series key., data_tests: [not_null]}
+      - {name: series_title, description: Parent series title.}
+      - {name: episode_tconst, description: Episode title key., data_tests: [not_null, unique]}
+      - {name: episode_title, description: Episode title.}
+      - {name: season_number, description: Season number.}
+      - {name: episode_number, description: Episode number.}
+      - {name: average_rating, description: Optional episode rating.}
+      - {name: dlt_load_id, description: Raw episode lineage., data_tests: [not_null]}

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import dlt
+from dlt.common.runtime.collector import LogCollector
 from dlt.common.schema import Schema
 from dlt.destinations import ducklake
 from dlt.destinations.impl.ducklake.configuration import DuckLakeCredentials
@@ -16,6 +20,8 @@ from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import IngestionError
 from imdb_ducklake.ingestion.resources import build_ingestion_resources
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +41,7 @@ def ingest_snapshot(
     build_paths: BuildPaths,
     pipelines_dir: Path,
     chunk_size: int = 5_000,
+    show_progress: bool = False,
 ) -> IngestionResult:
     """Replace the raw schema with one complete seven-file IMDb snapshot."""
     _validate_complete_snapshot(artifacts)
@@ -54,6 +61,29 @@ def ingest_snapshot(
     )
     schema = Schema("raw", normalizers={"names": "direct"})
     resources = build_ingestion_resources(artifacts, chunk_size=chunk_size)
+    total_bytes = sum(artifact.manifest_entry.size_bytes for artifact in artifacts)
+    logger.info(
+        "Starting dlt ingestion: build=%s files=%d compressed_bytes=%d catalog=%s",
+        build_paths.build_id,
+        len(artifacts),
+        total_bytes,
+        build_paths.catalog_path,
+    )
+    for artifact in artifacts:
+        logger.info(
+            "Queued dlt resource: table=%s file=%s compressed_bytes=%d",
+            artifact.dataset.table_name,
+            artifact.path.name,
+            artifact.manifest_entry.size_bytes,
+        )
+    pipeline_options: dict[str, Any] = {}
+    if show_progress:
+        pipeline_options["progress"] = LogCollector(
+            log_period=2.0,
+            logger=logging.getLogger("imdb_ducklake.dlt"),
+            dump_system_stats=False,
+        )
+    started = time.monotonic()
 
     try:
         pipeline = dlt.pipeline(
@@ -61,6 +91,7 @@ def ingest_snapshot(
             pipelines_dir=str(pipelines_dir.resolve()),
             destination=destination,
             dataset_name="raw",
+            **pipeline_options,
         )
         with dlt.config.values(
             {
@@ -82,6 +113,13 @@ def ingest_snapshot(
         raise IngestionError(
             f"dlt could not load IMDb snapshot into {build_paths.catalog_path}"
         ) from error
+
+    logger.info(
+        "Completed dlt ingestion: build=%s loads=%d elapsed_seconds=%.2f",
+        build_paths.build_id,
+        len(load_info.loads_ids),
+        time.monotonic() - started,
+    )
 
     return IngestionResult(
         pipeline_name=pipeline_name,

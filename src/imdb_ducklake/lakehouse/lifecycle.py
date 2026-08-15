@@ -289,6 +289,42 @@ def prune_obsolete_builds(
     return tuple(removed)
 
 
+def select_staged_build(lakehouse_dir: Path, *, build_id: str | None = None) -> BuildPaths:
+    """Select one complete unpromoted build, requiring an ID when selection is ambiguous."""
+    root = lakehouse_dir.resolve()
+    if build_id is not None:
+        candidates = (BuildPaths.create(root, build_id=build_id),)
+    else:
+        directories = [
+            path
+            for path in _safe_child_directories(root / "builds")
+            if _BUILD_ID_PATTERN.fullmatch(path.name)
+        ]
+        if not directories:
+            raise LifecycleError(f"No staged DuckLake build exists in {root / 'builds'}")
+        if len(directories) > 1:
+            names = ", ".join(sorted(path.name for path in directories))
+            raise LifecycleError(f"Multiple staged builds exist; select a build ID: {names}")
+        candidates = (BuildPaths.create(root, build_id=directories[0].name),)
+    selected = candidates[0]
+    try:
+        _validate_promotable_layout(selected)
+    except PromotionError as error:
+        raise LifecycleError(f"Staged build is incomplete: {selected.temporary_dir}") from error
+    return selected
+
+
+def list_staged_builds(lakehouse_dir: Path) -> tuple[BuildPaths, ...]:
+    """List validly named staged build workspaces without modifying them."""
+    root = lakehouse_dir.resolve()
+    directories = [
+        path
+        for path in _safe_child_directories(root / "builds")
+        if _BUILD_ID_PATTERN.fullmatch(path.name)
+    ]
+    return tuple(BuildPaths.create(root, build_id=path.name) for path in sorted(directories))
+
+
 @dataclass(frozen=True, slots=True)
 class BuildLockInfo:
     """Human-readable metadata stored while an OS-level build lock is held."""

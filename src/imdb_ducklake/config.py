@@ -65,3 +65,7 @@ class Settings:
     @property
     def dbt_project_dir(self) -> Path:
         return self.repository_root / "dbt"
+
+    @property
+    def dbt_state_dir(self) -> Path:
+        return self.data_dir / ".dbt"

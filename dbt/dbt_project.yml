@@ -1,0 +1,24 @@
+name: imdb_ducklake
+version: 1.0.0
+config-version: 2
+
+profile: imdb_ducklake
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  imdb_ducklake:
+    +database: imdb_lake
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table

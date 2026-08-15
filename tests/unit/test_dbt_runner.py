@@ -1,0 +1,79 @@
+import subprocess
+
+import pytest
+
+from imdb_ducklake.exceptions import TransformationError
+from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
+from imdb_ducklake.transformation.dbt_runner import run_dbt
+
+
+def _inputs(tmp_path):
+    paths = BuildPaths.create(tmp_path / "ducklake", build_id="dbt-unit")
+    initialize_build(paths)
+    paths.catalog_path.write_text("catalog", encoding="utf-8")
+    project = tmp_path / "dbt"
+    project.mkdir()
+    (project / "dbt_project.yml").write_text("name: fixture", encoding="utf-8")
+    (project / "profiles.yml").write_text("fixture: {}", encoding="utf-8")
+    return paths, project
+
+
+def test_runs_dbt_with_explicit_paths_and_environment(tmp_path) -> None:
+    paths, project = _inputs(tmp_path)
+    received = None
+
+    def runner(command, cwd, environment):
+        nonlocal received
+        received = command, cwd, environment
+        return subprocess.CompletedProcess(command, 0, "dbt succeeded", "")
+
+    result = run_dbt(
+        ("build", "--select", "staging"),
+        build_paths=paths,
+        project_dir=project,
+        profiles_dir=project,
+        controller_path=tmp_path / "state" / "controller.duckdb",
+        executable="dbt",
+        environment={"EXISTING": "value"},
+        runner=runner,
+    )
+
+    assert result.stdout == "dbt succeeded"
+    assert received is not None
+    command, cwd, environment = received
+    assert command[0:4] == ("dbt", "build", "--select", "staging")
+    assert cwd == tmp_path
+    assert environment["EXISTING"] == "value"
+    assert environment["IMDB_DUCKLAKE_CATALOG"] == paths.catalog_path.as_posix()
+    assert environment["IMDB_DUCKLAKE_STORAGE"] == paths.storage_dir.as_posix()
+
+
+def test_rejects_incomplete_build_and_wraps_dbt_failure(tmp_path) -> None:
+    paths = BuildPaths.create(tmp_path / "ducklake", build_id="dbt-unit")
+    with pytest.raises(TransformationError, match="build is incomplete"):
+        run_dbt(
+            ("build",),
+            build_paths=paths,
+            project_dir=tmp_path,
+            profiles_dir=tmp_path,
+            controller_path=tmp_path / "controller.duckdb",
+            executable="dbt",
+            environment={},
+        )
+
+    paths, project = _inputs(tmp_path / "failure")
+
+    def fail(command, _cwd, _environment):
+        return subprocess.CompletedProcess(command, 2, "", "SQL failed")
+
+    with pytest.raises(TransformationError, match="exit code 2: SQL failed"):
+        run_dbt(
+            ("build",),
+            build_paths=paths,
+            project_dir=project,
+            profiles_dir=project,
+            controller_path=tmp_path / "controller.duckdb",
+            executable="dbt",
+            environment={},
+            runner=fail,
+        )

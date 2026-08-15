@@ -1,0 +1,104 @@
+version: 2
+
+models:
+  - name: dim_titles
+    description: One canonical typed row per IMDb title.
+    columns:
+      - {name: tconst, description: Title dimension key., data_tests: [not_null, unique]}
+      - {name: primary_title, description: Primary display title.}
+      - {name: genres, description: Genre array.}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: dim_people
+    description: One canonical typed row per IMDb person.
+    columns:
+      - {name: nconst, description: Person dimension key., data_tests: [not_null, unique]}
+      - {name: primary_name, description: Primary person name.}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: fct_title_ratings
+    description: One rating and vote-measure row per rated title.
+    columns:
+      - name: tconst
+        description: Rated title key.
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: average_rating, description: Average rating measure.}
+      - {name: num_votes, description: Vote-count measure.}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: fct_episodes
+    description: Episode-to-series relationship fact.
+    columns:
+      - name: tconst
+        description: Episode title key.
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - name: parent_tconst
+        description: Parent series title key.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: season_number, description: Season number.}
+      - {name: episode_number, description: Episode number.}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: bridge_title_genres
+    description: One row per title and genre.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: genre, description: Normalized genre., data_tests: [not_null]}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: bridge_title_credits
+    description: One row per ordered principal title credit.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - relationships:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - name: nconst
+        description: Person key.
+        data_tests:
+          - relationships:
+              arguments: {to: "ref('dim_people')", field: nconst}
+      - {name: ordering, description: Credit ordering.}
+      - {name: category, description: Credit category.}
+      - {name: characters, description: Character name array.}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: bridge_title_crew
+    description: One row per title, crew role, and person.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - relationships:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - name: nconst
+        description: Crew person key.
+        data_tests:
+          - relationships:
+              arguments: {to: "ref('dim_people')", field: nconst}
+      - {name: crew_role, description: Director or writer role.}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: bridge_title_akas
+    description: Typed alternate-title bridge.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - relationships:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: ordering, description: Alternate-title ordering.}
+      - {name: title, description: Alternate title text.}
+      - {name: region, description: Optional region code.}
+      - {name: language, description: Optional language code.}
+      - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
