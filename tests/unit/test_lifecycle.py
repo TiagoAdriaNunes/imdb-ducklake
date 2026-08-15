@@ -16,6 +16,8 @@ from imdb_ducklake.lakehouse.lifecycle import (
     initialize_build,
     new_build_id,
     promote_build,
+    prune_obsolete_builds,
+    recover_interrupted_promotion,
     temporary_build,
 )
 
@@ -74,6 +76,23 @@ def test_initialize_and_cleanup_build_workspace(tmp_path) -> None:
     assert not paths.temporary_dir.exists()
 
 
+def test_initialize_cleans_workspace_when_storage_creation_fails(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    real_mkdir = Path.mkdir
+
+    def fail_storage(path, *args, **kwargs):
+        if path == paths.storage_dir:
+            raise FileExistsError("simulated storage race")
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", fail_storage)
+
+    with pytest.raises(LifecycleError, match="Could not initialize build storage"):
+        initialize_build(paths)
+
+    assert not paths.temporary_dir.exists()
+
+
 def test_temporary_build_cleans_failure_without_touching_current(tmp_path) -> None:
     paths = _paths(tmp_path)
     paths.current_dir.mkdir(parents=True)
@@ -126,10 +145,13 @@ def test_build_lock_records_owner_and_blocks_contention(tmp_path) -> None:
         assert first.info is not None
         assert first.info.token == "first"
         assert first.info.acquired_at == NOW.isoformat()
-        with pytest.raises(LifecycleError, match="Another build holds"):
+        with pytest.raises(
+            LifecycleError,
+            match=rf"Another build holds.*process {first.info.process_id}, acquired",
+        ):
             second.acquire()
 
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(path.read_bytes()[1:].decode("utf-8"))
     assert value["token"] == "first"
 
     with second:
@@ -213,6 +235,60 @@ def test_promotion_failure_rolls_previous_build_back(tmp_path, monkeypatch) -> N
     assert not (root / "retired" / "build-2-previous-rollback").exists()
 
 
+def test_next_promotion_recovers_crash_between_directory_moves(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "ducklake"
+    current = root / "current"
+    current.mkdir(parents=True)
+    (current / "catalog.duckdb").write_text("old", encoding="utf-8")
+    (current / "storage").mkdir()
+    paths = BuildPaths.create(root, build_id="build-2")
+    _complete_build(paths)
+    real_replace = lifecycle.os.replace
+
+    def crash_after_retiring_current(source, destination):
+        real_replace(source, destination)
+        if Path(source) == current:
+            raise RuntimeError("simulated process termination")
+
+    monkeypatch.setattr(lifecycle.os, "replace", crash_after_retiring_current)
+    with pytest.raises(RuntimeError, match="process termination"):
+        promote_build(paths, token_factory=lambda: "recover")
+
+    assert not current.exists()
+    assert (root / ".promotion.json").is_file()
+    monkeypatch.setattr(lifecycle.os, "replace", real_replace)
+
+    assert recover_interrupted_promotion(root)
+    assert (current / "catalog.duckdb").read_text(encoding="utf-8") == "old"
+    assert paths.temporary_dir.is_dir()
+    assert not (root / ".promotion.json").exists()
+
+    promoted = promote_build(paths, token_factory=lambda: "retry")
+    assert promoted.catalog_path.read_text(encoding="utf-8") == "new"
+
+
+def test_prunes_orphaned_builds_and_keeps_newest_retired(tmp_path) -> None:
+    root = tmp_path / "ducklake"
+    orphan = root / "builds" / "orphan"
+    protected = root / "builds" / "protected"
+    old_retired = root / "retired" / "old"
+    new_retired = root / "retired" / "new"
+    for path in (orphan, protected, old_retired, new_retired):
+        path.mkdir(parents=True)
+    lifecycle.os.utime(old_retired, ns=(1, 1))
+    lifecycle.os.utime(new_retired, ns=(2, 2))
+
+    removed = prune_obsolete_builds(
+        root,
+        keep_retired=1,
+        protected_build_ids=("protected",),
+    )
+
+    assert set(removed) == {orphan, old_retired}
+    assert protected.is_dir()
+    assert new_retired.is_dir()
+
+
 def test_promotion_rejects_unsafe_retirement_token_before_moving_current(tmp_path) -> None:
     root = tmp_path / "ducklake"
     current = root / "current"
@@ -227,6 +303,7 @@ def test_promotion_rejects_unsafe_retirement_token_before_moving_current(tmp_pat
 
     assert marker.read_text(encoding="utf-8") == "old"
     assert paths.temporary_dir.exists()
+    assert not (root / "retired").exists()
 
 
 def test_incomplete_build_cannot_be_promoted(tmp_path) -> None:

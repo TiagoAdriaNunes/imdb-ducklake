@@ -39,6 +39,28 @@ class _RetryableResponseError(Exception):
     pass
 
 
+def load_verified_artifacts(
+    datasets: Iterable[DatasetSpec],
+    *,
+    raw_dir: Path,
+    manifest_path: Path,
+    chunk_size: int = 1024 * 1024,
+) -> tuple[VerifiedArtifact, ...]:
+    """Revalidate retained archives and reconstruct their typed artifact values."""
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be at least one")
+    manifest = load_manifest(manifest_path)
+    artifacts: list[VerifiedArtifact] = []
+    for dataset in datasets:
+        entry = manifest.get(dataset.table_name)
+        if entry is None:
+            raise AcquisitionError(f"Manifest has no verified entry for {dataset.file_name}")
+        path = raw_dir / dataset.file_name
+        _verify_retained_artifact(dataset, path, entry, chunk_size=chunk_size)
+        artifacts.append(VerifiedArtifact(dataset, path, entry))
+    return tuple(artifacts)
+
+
 class Downloader:
     """Download and validate source archives without mutating good files in place."""
 
@@ -104,18 +126,13 @@ class Downloader:
         target: Path,
         entry: ManifestEntry,
     ) -> bool:
-        if (
-            entry.file_name != dataset.file_name
-            or entry.url != dataset.url
-            or entry.dataset != dataset.name
-            or not target.is_file()
-        ):
-            return False
-        size_bytes, sha256 = _hash_file(target, self._chunk_size)
-        if size_bytes != entry.size_bytes or sha256 != entry.sha256:
-            return False
         try:
-            _validate_archive(target, dataset)
+            _verify_retained_artifact(
+                dataset,
+                target,
+                entry,
+                chunk_size=self._chunk_size,
+            )
         except AcquisitionError:
             return False
         return True
@@ -290,6 +307,28 @@ def _hash_file(path: Path, chunk_size: int) -> tuple[int, str]:
     except OSError as error:
         raise AcquisitionError(f"Could not read source archive {path}") from error
     return size_bytes, digest.hexdigest()
+
+
+def _verify_retained_artifact(
+    dataset: DatasetSpec,
+    path: Path,
+    entry: ManifestEntry,
+    *,
+    chunk_size: int,
+) -> None:
+    if (
+        entry.dataset != dataset.name
+        or entry.file_name != dataset.file_name
+        or entry.table_name != dataset.table_name
+        or entry.url != dataset.url
+    ):
+        raise AcquisitionError(f"Manifest metadata does not match {dataset.file_name}")
+    if not path.is_file():
+        raise AcquisitionError(f"Verified source archive does not exist: {path}")
+    size_bytes, sha256 = _hash_file(path, chunk_size)
+    if size_bytes != entry.size_bytes or sha256 != entry.sha256:
+        raise AcquisitionError(f"Checksum does not match manifest for {dataset.file_name}")
+    _validate_archive(path, dataset)
 
 
 def _validate_archive(path: Path, dataset: DatasetSpec) -> None:
