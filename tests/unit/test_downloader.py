@@ -244,6 +244,114 @@ def test_rejects_mismatched_content_range_without_appending(tmp_path) -> None:
     assert not list(raw_dir.glob("*.part"))
 
 
+def test_rejects_corrupt_gzip_received_from_byte_zero(tmp_path) -> None:
+    invalid_body = b"not a gzip archive"
+    raw_dir, manifest_path = _paths(tmp_path)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=httpx.ByteStream(invalid_body))
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(AcquisitionError, match="Invalid gzip archive"),
+    ):
+        Downloader(client).download_all([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+
+    assert not list(raw_dir.glob("*.part"))
+
+
+def test_resumes_after_content_length_mismatch(tmp_path) -> None:
+    body = _archive(row="1\tcontent length retry")
+    split_at = len(body) // 2
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            assert "range" not in request.headers
+            return httpx.Response(
+                200,
+                stream=httpx.ByteStream(body[:split_at]),
+                headers={"content-length": str(len(body))},
+            )
+        assert request.headers["range"] == f"bytes={split_at}-"
+        remainder = body[split_at:]
+        return httpx.Response(
+            206,
+            stream=httpx.ByteStream(remainder),
+            headers={
+                "content-length": str(len(remainder)),
+                "content-range": f"bytes {split_at}-{len(body) - 1}/{len(body)}",
+            },
+        )
+
+    raw_dir, manifest_path = _paths(tmp_path)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        artifact = Downloader(client, sleeper=lambda _delay: None).download_all(
+            [SPEC], raw_dir=raw_dir, manifest_path=manifest_path
+        )[0]
+
+    assert requests == 2
+    assert artifact.path.read_bytes() == body
+
+
+def test_restarts_after_server_rejects_partial_range(tmp_path) -> None:
+    body = _archive()
+    partial = body[: len(body) // 2]
+    requests = 0
+    raw_dir, manifest_path = _paths(tmp_path)
+    raw_dir.mkdir()
+    (raw_dir / f"{SPEC.file_name}.part").write_bytes(partial)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            assert request.headers["range"] == f"bytes={len(partial)}-"
+            return httpx.Response(416)
+        assert "range" not in request.headers
+        return httpx.Response(200, stream=httpx.ByteStream(body))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        artifact = Downloader(client, sleeper=lambda _delay: None).download_all(
+            [SPEC], raw_dir=raw_dir, manifest_path=manifest_path
+        )[0]
+
+    assert requests == 2
+    assert artifact.path.read_bytes() == body
+
+
+def test_archive_write_failure_preserves_existing_target(tmp_path, monkeypatch) -> None:
+    body = _archive(row="1\treplacement")
+    old_body = _archive(row="1\texisting")
+    raw_dir, manifest_path = _paths(tmp_path)
+    raw_dir.mkdir()
+    target = raw_dir / SPEC.file_name
+    target.write_bytes(old_body)
+    original_open = type(target).open
+
+    def fail_part_write(path, mode="r", *args, **kwargs):
+        if path.name.endswith(".part") and mode == "wb":
+            raise OSError("simulated disk failure")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(type(target), "open", fail_part_write)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=httpx.ByteStream(body))
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(AcquisitionError, match="Could not store"),
+    ):
+        Downloader(client).download_all(
+            [SPEC], raw_dir=raw_dir, manifest_path=manifest_path, force=True
+        )
+
+    assert target.read_bytes() == old_body
+
+
 def test_bad_header_does_not_replace_existing_archive(tmp_path) -> None:
     old_body = _archive(row="1\told")
     invalid_body = _archive(header="unexpected\theader")
