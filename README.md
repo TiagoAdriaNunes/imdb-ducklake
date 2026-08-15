@@ -106,7 +106,10 @@ uv run imdb-lakehouse transform
 ```
 
 The command builds the `staging`, `intermediate`, and `marts` schemas and prints dbt's complete
-result. If more than one staged build exists, select the build ID printed by ingestion:
+result. Known sparse IMDb relationship gaps are measured as ratios and fail the build if they
+exceed 0.01%; they are not patched in the source data. Large title-search arrays are materialized
+as separate rollups to keep peak DuckDB memory bounded. If more than one staged build exists,
+select the build ID printed by ingestion:
 
 ```powershell
 uv run imdb-lakehouse transform --build-id 20260815T123000Z-abc123

@@ -15,5 +15,5 @@ union all
 
 select nconst, 'person year'
 from {{ ref('stg_imdb__name_basics') }}
-where birth_year not between 1800 and 2200
-    or death_year not between 1800 and 2200
+where birth_year not between 1 and 2200
+    or death_year not between 1 and 2200

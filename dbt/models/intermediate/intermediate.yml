@@ -22,7 +22,7 @@ models:
         data_tests:
           - not_null
           - unique
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - {name: average_rating, description: Average rating measure.}
       - {name: num_votes, description: Vote-count measure.}
@@ -35,13 +35,13 @@ models:
         data_tests:
           - not_null
           - unique
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - name: parent_tconst
         description: Parent series title key.
         data_tests:
           - not_null
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - {name: season_number, description: Season number.}
       - {name: episode_number, description: Episode number.}
@@ -53,7 +53,7 @@ models:
         description: Title key.
         data_tests:
           - not_null
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - {name: genre, description: Normalized genre., data_tests: [not_null]}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
@@ -63,12 +63,12 @@ models:
       - name: tconst
         description: Title key.
         data_tests:
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - name: nconst
         description: Person key.
         data_tests:
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_people')", field: nconst}
       - {name: ordering, description: Credit ordering.}
       - {name: category, description: Credit category.}
@@ -80,12 +80,12 @@ models:
       - name: tconst
         description: Title key.
         data_tests:
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - name: nconst
         description: Crew person key.
         data_tests:
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_people')", field: nconst}
       - {name: crew_role, description: Director or writer role.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
@@ -95,10 +95,43 @@ models:
       - name: tconst
         description: Title key.
         data_tests:
-          - relationships:
+          - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - {name: ordering, description: Alternate-title ordering.}
       - {name: title, description: Alternate title text.}
       - {name: region, description: Optional region code.}
       - {name: language, description: Optional language code.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
+  - name: int_title_genre_lists
+    description: One persisted genre array per title, built separately to bound mart memory use.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - not_null
+          - unique
+          - relationships_with_max_orphan_ratio:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: genres, description: Sorted genre array., data_tests: [not_null]}
+  - name: int_title_director_lists
+    description: One persisted director-name array per title.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - not_null
+          - unique
+          - relationships_with_max_orphan_ratio:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: directors, description: Sorted distinct director-name array., data_tests: [not_null]}
+  - name: int_title_principal_cast_lists
+    description: One persisted principal-cast-name array per title.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - not_null
+          - unique
+          - relationships_with_max_orphan_ratio:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: principal_cast, description: Sorted distinct principal-cast-name array., data_tests: [not_null]}
