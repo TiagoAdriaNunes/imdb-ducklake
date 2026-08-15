@@ -1,0 +1,90 @@
+version: 2
+
+sources:
+  - name: imdb_raw
+    description: Lossless IMDb source values loaded by dlt from one verified full snapshot.
+    database: imdb_lake
+    schema: raw
+    tables:
+      - name: title_akas
+        description: Localized and alternate title names.
+        columns:
+          - {name: titleId, description: IMDb title identifier.}
+          - {name: ordering, description: Ordering within the title's alternate names.}
+          - {name: title, description: Localized or alternate title text.}
+          - {name: region, description: Region code as published by IMDb.}
+          - {name: language, description: Language code as published by IMDb.}
+          - {name: types, description: Comma-delimited alternate-title types.}
+          - {name: attributes, description: Comma-delimited alternate-title attributes.}
+          - {name: isOriginalTitle, description: Raw original-title flag.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}
+      - name: title_basics
+        description: Core title attributes.
+        columns:
+          - {name: tconst, description: IMDb title identifier.}
+          - {name: titleType, description: IMDb title type.}
+          - {name: primaryTitle, description: Primary display title.}
+          - {name: originalTitle, description: Original title text.}
+          - {name: isAdult, description: Raw adult-content flag.}
+          - {name: startYear, description: Raw release start year.}
+          - {name: endYear, description: Raw release end year.}
+          - {name: runtimeMinutes, description: Raw runtime in minutes.}
+          - {name: genres, description: Comma-delimited genres.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}
+      - name: title_crew
+        description: Director and writer identifiers by title.
+        columns:
+          - {name: tconst, description: IMDb title identifier.}
+          - {name: directors, description: Comma-delimited director identifiers.}
+          - {name: writers, description: Comma-delimited writer identifiers.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}
+      - name: title_episode
+        description: Episode-to-series relationships.
+        columns:
+          - {name: tconst, description: IMDb episode title identifier.}
+          - {name: parentTconst, description: IMDb parent series identifier.}
+          - {name: seasonNumber, description: Raw season number.}
+          - {name: episodeNumber, description: Raw episode number.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}
+      - name: title_principals
+        description: Principal credits for each title.
+        columns:
+          - {name: tconst, description: IMDb title identifier.}
+          - {name: ordering, description: Credit ordering within the title.}
+          - {name: nconst, description: IMDb person identifier.}
+          - {name: category, description: Principal credit category.}
+          - {name: job, description: Specific job text.}
+          - {name: characters, description: JSON array of character names.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}
+      - name: title_ratings
+        description: Aggregate title ratings and vote counts.
+        columns:
+          - {name: tconst, description: IMDb title identifier.}
+          - {name: averageRating, description: Raw average rating.}
+          - {name: numVotes, description: Raw vote count.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}
+      - name: name_basics
+        description: Core person attributes and known-for titles.
+        columns:
+          - {name: nconst, description: IMDb person identifier.}
+          - {name: primaryName, description: Primary person name.}
+          - {name: birthYear, description: Raw birth year.}
+          - {name: deathYear, description: Raw death year.}
+          - {name: primaryProfession, description: Comma-delimited professions.}
+          - {name: knownForTitles, description: Comma-delimited known-for title identifiers.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}
+      - name: ingestion_files
+        description: Verified source manifest metadata associated with each dlt load.
+        columns:
+          - {name: dataset, description: Dataset registry name.}
+          - {name: file_name, description: Retained archive filename.}
+          - {name: table_name, description: Raw destination table name.}
+          - {name: url, description: IMDb source URL.}
+          - {name: size_bytes, description: Verified compressed byte size.}
+          - {name: sha256, description: Verified SHA-256 digest.}
+          - {name: downloaded_at, description: UTC acquisition timestamp.}
+          - {name: batch_id, description: Acquisition batch identifier.}
+          - {name: etag, description: Source HTTP ETag when available.}
+          - {name: last_modified, description: Source HTTP Last-Modified when available.}
+          - {name: content_type, description: Source HTTP Content-Type when available.}
+          - {name: _dlt_load_id, description: dlt load lineage identifier.}

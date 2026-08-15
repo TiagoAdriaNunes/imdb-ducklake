@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from dlt.common.runtime.collector import LogCollector
 
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
 from imdb_ducklake.acquisition.manifest import ManifestEntry
@@ -60,6 +61,7 @@ def test_dlt_startup_failure_is_wrapped_with_catalog_context(tmp_path, monkeypat
 
     def fail_pipeline(**kwargs):
         assert kwargs["pipeline_name"] == "imdb_build_with_symbols"
+        assert isinstance(kwargs["progress"], LogCollector)
         raise RuntimeError("dlt unavailable")
 
     monkeypatch.setattr(ingestion_pipeline.dlt, "pipeline", fail_pipeline)
@@ -69,6 +71,7 @@ def test_dlt_startup_failure_is_wrapped_with_catalog_context(tmp_path, monkeypat
             artifacts,
             build_paths=paths,
             pipelines_dir=tmp_path / "pipelines",
+            show_progress=True,
         )
 
     assert isinstance(raised.value.__cause__, RuntimeError)

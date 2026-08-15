@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 from imdb_ducklake import cli
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import AcquisitionError
+from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
 
 runner = CliRunner()
 
@@ -48,10 +49,11 @@ def test_ingest_command_loads_isolated_build_and_reports_catalog(tmp_path, monke
     monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
     monkeypatch.setattr(cli, "load_verified_artifacts", lambda *_args, **_kwargs: artifacts)
 
-    def fake_ingest(received, *, build_paths, pipelines_dir):
+    def fake_ingest(received, *, build_paths, pipelines_dir, show_progress):
         assert received == artifacts
         assert build_paths.storage_dir.is_dir()
         assert pipelines_dir == settings.dlt_pipelines_dir
+        assert show_progress is True
         build_paths.catalog_path.write_text("fixture", encoding="utf-8")
         return SimpleNamespace(load_ids=("load-1",), catalog_path=build_paths.catalog_path)
 
@@ -76,6 +78,46 @@ def test_ingest_command_maps_archive_verification_error(monkeypatch) -> None:
 
     assert result.exit_code == 1
     assert "Error: retained archive is invalid" in result.output
+
+
+def test_ingest_preserves_existing_staged_build_without_explicit_replace(
+    tmp_path, monkeypatch
+) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    staged = BuildPaths.create(settings.lakehouse_dir, build_id="existing-build")
+    initialize_build(staged)
+    staged.catalog_path.write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    monkeypatch.setattr(cli, "load_verified_artifacts", lambda *_args, **_kwargs: (object(),) * 7)
+
+    result = runner.invoke(cli.app, ["ingest"])
+
+    assert result.exit_code == 1
+    assert "pass --replace-staged" in result.output
+    assert staged.temporary_dir.is_dir()
+
+
+def test_transform_command_runs_dbt_for_staged_build(tmp_path, monkeypatch) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    paths = BuildPaths.create(settings.lakehouse_dir, build_id="fixture-build")
+    initialize_build(paths)
+    paths.catalog_path.write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    monkeypatch.setattr(cli, "select_staged_build", lambda *_args, **_kwargs: paths)
+
+    def fake_run(dbt_args, **kwargs):
+        assert dbt_args == ("build",)
+        assert kwargs["build_paths"] == paths
+        assert kwargs["controller_path"] == settings.dbt_state_dir / "fixture-build.duckdb"
+        return SimpleNamespace(stdout="dbt completed\n")
+
+    monkeypatch.setattr(cli, "run_dbt", fake_run)
+
+    result = runner.invoke(cli.app, ["transform", "--build-id", "fixture-build"])
+
+    assert result.exit_code == 0
+    assert "dbt completed" in result.stdout
+    assert "Transformed and tested build fixture-build; it remains unpromoted." in result.stdout
 
 
 def test_main_invokes_typer_application(monkeypatch) -> None:

@@ -1,6 +1,9 @@
 """Command-line composition root for the IMDb DuckLake application."""
 
+from os import environ
+from os import name as os_name
 from pathlib import Path
+from sys import executable as python_executable
 from typing import Annotated
 
 import httpx
@@ -9,16 +12,19 @@ import typer
 from imdb_ducklake.acquisition.downloader import Downloader, load_verified_artifacts
 from imdb_ducklake.config import Settings
 from imdb_ducklake.datasets import DATASETS
-from imdb_ducklake.exceptions import ImdbLakehouseError
+from imdb_ducklake.exceptions import ImdbLakehouseError, LifecycleError
 from imdb_ducklake.ingestion.pipeline import ingest_snapshot
 from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
+    list_staged_builds,
     prune_obsolete_builds,
     recover_interrupted_promotion,
+    select_staged_build,
     temporary_build,
 )
 from imdb_ducklake.observability import configure_logging
+from imdb_ducklake.transformation.dbt_runner import run_dbt
 
 app = typer.Typer(
     name="imdb-lakehouse",
@@ -73,6 +79,13 @@ def download_command(
 
 @app.command("ingest")
 def ingest_command(
+    replace_staged: Annotated[
+        bool,
+        typer.Option(
+            "--replace-staged",
+            help="Delete existing unpromoted builds before loading a fresh snapshot.",
+        ),
+    ] = False,
     data_dir: Annotated[
         Path | None,
         typer.Option(
@@ -95,18 +108,69 @@ def ingest_command(
         paths = BuildPaths.create(settings.lakehouse_dir)
         with BuildLock(paths.lock_path):
             recover_interrupted_promotion(settings.lakehouse_dir)
-            prune_obsolete_builds(settings.lakehouse_dir)
+            staged = list_staged_builds(settings.lakehouse_dir)
+            if staged and not replace_staged:
+                staged_ids = ", ".join(build.build_id for build in staged)
+                raise LifecycleError(
+                    "A staged build already exists. Run transform first or pass "
+                    f"--replace-staged to discard it: {staged_ids}"
+                )
+            if replace_staged:
+                prune_obsolete_builds(settings.lakehouse_dir)
             with temporary_build(paths):
                 result = ingest_snapshot(
                     artifacts,
                     build_paths=paths,
                     pipelines_dir=settings.dlt_pipelines_dir,
+                    show_progress=True,
                 )
         typer.echo(
             f"Loaded {len(artifacts)} archives into build {paths.build_id} "
             f"({len(result.load_ids)} dlt load(s))."
         )
         typer.echo(f"Catalog: {result.catalog_path}")
+    except ImdbLakehouseError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+@app.command("transform")
+def transform_command(
+    build_id: Annotated[
+        str | None,
+        typer.Option("--build-id", help="Transform a specific staged build ID."),
+    ] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            help="Override the repository-relative data directory.",
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ] = None,
+) -> None:
+    """Run all dbt models and tests against one staged DuckLake build."""
+    try:
+        settings = Settings.load(data_dir=data_dir)
+        configure_logging(settings.log_level)
+        with BuildLock(settings.lakehouse_dir / ".build.lock"):
+            recover_interrupted_promotion(settings.lakehouse_dir)
+            paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+            dbt_executable = Path(python_executable).with_name(
+                "dbt.exe" if os_name == "nt" else "dbt"
+            )
+            result = run_dbt(
+                ("build",),
+                build_paths=paths,
+                project_dir=settings.dbt_project_dir,
+                profiles_dir=settings.dbt_project_dir,
+                controller_path=settings.dbt_state_dir / f"{paths.build_id}.duckdb",
+                executable=str(dbt_executable),
+                environment=environ,
+            )
+        typer.echo(result.stdout.rstrip())
+        typer.echo(f"Transformed and tested build {paths.build_id}; it remains unpromoted.")
     except ImdbLakehouseError as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error

@@ -1,6 +1,9 @@
 import gzip
 import hashlib
+import os
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -10,6 +13,7 @@ from imdb_ducklake.acquisition.manifest import ManifestEntry
 from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.ingestion.pipeline import ingest_snapshot
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
+from imdb_ducklake.transformation.dbt_runner import run_dbt
 
 ROWS = {
     "title_akas": ("tt0001", "1", "Exemplo", "BR", "pt", "\\N", "\\N", "1"),
@@ -119,6 +123,8 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
         assert set(source_types.values()) == {"VARCHAR"}
 
     replacement_rows = (
+        ("tt0001", "movie", "Exámple 東京", "Example", "0", "2020", "\\N", "90", "Drama"),
+        ("tt0002", "tvEpisode", "Episode", "Episode", "0", "2021", "\\N", "45", "Drama"),
         ("tt-new", "movie", "Replacement", "Replacement", "0", "2026", "\\N", "91", "Drama"),
     )
     replacement = _snapshot(tmp_path / "raw", title_rows=replacement_rows)
@@ -132,6 +138,66 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
     assert replacement_result.load_ids != result.load_ids
     with duckdb.connect(":memory:") as connection:
         connection.execute(f"ATTACH 'ducklake:{catalog}' AS imdb_lake (DATA_PATH '{storage}')")
+        assert set(
+            connection.execute('SELECT "tconst" FROM imdb_lake.raw."title_basics"').fetchall()
+        ) == {("tt0001",), ("tt0002",), ("tt-new",)}
+
+    repository_root = Path(__file__).parents[2]
+    dbt_executable = Path(sys.executable).with_name("dbt.exe" if os.name == "nt" else "dbt")
+    dbt_result = run_dbt(
+        ("build",),
+        build_paths=paths,
+        project_dir=repository_root / "dbt",
+        profiles_dir=repository_root / "dbt",
+        controller_path=tmp_path / "dbt" / "controller.duckdb",
+        executable=str(dbt_executable),
+        environment=os.environ,
+    )
+    assert "Completed successfully" in dbt_result.stdout
+    run_dbt(
+        ("docs", "generate"),
+        build_paths=paths,
+        project_dir=repository_root / "dbt",
+        profiles_dir=repository_root / "dbt",
+        controller_path=tmp_path / "dbt" / "controller.duckdb",
+        executable=str(dbt_executable),
+        environment=os.environ,
+    )
+    assert (repository_root / "dbt" / "target" / "catalog.json").is_file()
+
+    with duckdb.connect(":memory:") as connection:
+        connection.execute(f"ATTACH 'ducklake:{catalog}' AS imdb_lake (DATA_PATH '{storage}')")
+        transformed = connection.execute(
+            "SELECT tconst, start_year, end_year, genres, dlt_load_id "
+            "FROM imdb_lake.staging.stg_imdb__title_basics WHERE tconst = 'tt-new'"
+        ).fetchone()
+        assert transformed is not None
+        assert transformed[0:4] == ("tt-new", 2026, None, ["Drama"])
+        assert transformed[4]
         assert connection.execute(
-            'SELECT "tconst" FROM imdb_lake.raw."title_basics"'
-        ).fetchall() == [("tt-new",)]
+            "SELECT characters FROM imdb_lake.staging.stg_imdb__title_principals"
+        ).fetchone()[0] == ["Hero"]
+        title_search = connection.execute(
+            "SELECT primary_title, average_rating, genres, directors, principal_cast "
+            "FROM imdb_lake.marts.mart_title_search WHERE tconst = 'tt0001'"
+        ).fetchone()
+        assert title_search == (
+            "Exámple 東京",
+            7.5,
+            ["Drama"],
+            ["Example Person"],
+            ["Example Person"],
+        )
+        assert connection.execute(
+            "SELECT title_count, rated_title_count, total_votes "
+            "FROM imdb_lake.marts.mart_genre_year_summary "
+            "WHERE start_year = 2020 AND genre = 'Drama'"
+        ).fetchone() == (1, 1, 100)
+        assert connection.execute(
+            "SELECT nconst, tconst, category, characters "
+            "FROM imdb_lake.marts.mart_person_filmography"
+        ).fetchone() == ("nm0001", "tt0001", "actor", ["Hero"])
+        assert connection.execute(
+            "SELECT series_tconst, episode_tconst, season_number, episode_number "
+            "FROM imdb_lake.marts.mart_series_episodes"
+        ).fetchone() == ("tt0001", "tt0002", 1, 1)

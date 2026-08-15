@@ -1,0 +1,79 @@
+version: 2
+
+models:
+  - name: stg_imdb__title_akas
+    description: Alternate titles with normalized names, nulls, flags, and array fields.
+    columns:
+      - {name: title_id, description: IMDb title identifier., data_tests: [not_null]}
+      - {name: ordering, description: Alternate-title ordering., data_tests: [not_null]}
+      - {name: title, description: Alternate title text.}
+      - {name: region, description: Optional region code.}
+      - {name: language, description: Optional language code.}
+      - {name: types, description: Alternate-title type array.}
+      - {name: attributes, description: Alternate-title attribute array.}
+      - {name: is_original_title, description: Whether this is the original title.}
+      - {name: dlt_load_id, description: Raw ingestion load lineage., data_tests: [not_null]}
+  - name: stg_imdb__title_basics
+    description: Typed core title attributes with IMDb null markers normalized.
+    columns:
+      - {name: tconst, description: IMDb title identifier., data_tests: [not_null, unique]}
+      - {name: title_type, description: IMDb title type.}
+      - {name: primary_title, description: Primary display title.}
+      - {name: original_title, description: Original title text.}
+      - {name: is_adult, description: Adult-content flag.}
+      - {name: start_year, description: Release start year.}
+      - {name: end_year, description: Release end year.}
+      - {name: runtime_minutes, description: Runtime in minutes.}
+      - {name: genres, description: Genre array.}
+      - {name: dlt_load_id, description: Raw ingestion load lineage., data_tests: [not_null]}
+  - name: stg_imdb__title_crew
+    description: Title directors and writers as identifier arrays.
+    columns:
+      - {name: tconst, description: IMDb title identifier., data_tests: [not_null, unique]}
+      - {name: directors, description: Director identifier array.}
+      - {name: writers, description: Writer identifier array.}
+      - {name: dlt_load_id, description: Raw ingestion load lineage., data_tests: [not_null]}
+  - name: stg_imdb__title_episode
+    description: Typed episode-to-series relationships.
+    columns:
+      - {name: tconst, description: Episode title identifier., data_tests: [not_null, unique]}
+      - {name: parent_tconst, description: Parent series identifier., data_tests: [not_null]}
+      - {name: season_number, description: Season number.}
+      - {name: episode_number, description: Episode number.}
+      - {name: dlt_load_id, description: Raw ingestion load lineage., data_tests: [not_null]}
+  - name: stg_imdb__title_principals
+    description: Typed principal credits with parsed character arrays.
+    columns:
+      - {name: tconst, description: IMDb title identifier., data_tests: [not_null]}
+      - {name: ordering, description: Principal credit ordering., data_tests: [not_null]}
+      - {name: nconst, description: IMDb person identifier., data_tests: [not_null]}
+      - {name: category, description: Principal role category.}
+      - {name: job, description: Optional detailed job.}
+      - {name: characters, description: Character name array.}
+      - {name: dlt_load_id, description: Raw ingestion load lineage., data_tests: [not_null]}
+  - name: stg_imdb__title_ratings
+    description: Typed aggregate title ratings.
+    columns:
+      - {name: tconst, description: IMDb title identifier., data_tests: [not_null, unique]}
+      - {name: average_rating, description: Average rating from zero to ten., data_tests: [not_null]}
+      - {name: num_votes, description: Non-negative vote count., data_tests: [not_null]}
+      - {name: dlt_load_id, description: Raw ingestion load lineage., data_tests: [not_null]}
+  - name: stg_imdb__name_basics
+    description: Typed person attributes with profession and known-for arrays.
+    columns:
+      - {name: nconst, description: IMDb person identifier., data_tests: [not_null, unique]}
+      - {name: primary_name, description: Primary person name.}
+      - {name: birth_year, description: Birth year.}
+      - {name: death_year, description: Death year.}
+      - {name: primary_professions, description: Profession array.}
+      - {name: known_for_titles, description: Known-for title identifier array.}
+      - {name: dlt_load_id, description: Raw ingestion load lineage., data_tests: [not_null]}
+  - name: stg_imdb__ingestion_files
+    description: Typed verified-file manifest metadata for raw lineage.
+    columns:
+      - {name: table_name, description: Raw destination table., data_tests: [not_null, unique]}
+      - {name: file_name, description: Retained archive filename., data_tests: [not_null]}
+      - {name: size_bytes, description: Verified compressed size., data_tests: [not_null]}
+      - {name: sha256, description: Verified archive digest., data_tests: [not_null]}
+      - {name: batch_id, description: Acquisition batch identifier., data_tests: [not_null]}
+      - {name: dlt_load_id, description: dlt load identifier., data_tests: [not_null]}

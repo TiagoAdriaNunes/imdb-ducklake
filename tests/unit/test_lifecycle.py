@@ -14,10 +14,12 @@ from imdb_ducklake.lakehouse.lifecycle import (
     cleanup_build,
     ensure_free_space,
     initialize_build,
+    list_staged_builds,
     new_build_id,
     promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
+    select_staged_build,
     temporary_build,
 )
 
@@ -287,6 +289,23 @@ def test_prunes_orphaned_builds_and_keeps_newest_retired(tmp_path) -> None:
     assert set(removed) == {orphan, old_retired}
     assert protected.is_dir()
     assert new_retired.is_dir()
+
+
+def test_selects_one_complete_staged_build_or_requires_an_id(tmp_path) -> None:
+    root = tmp_path / "ducklake"
+    with pytest.raises(LifecycleError, match="No staged"):
+        select_staged_build(root)
+
+    first = BuildPaths.create(root, build_id="build-1")
+    _complete_build(first)
+    assert select_staged_build(root) == first
+
+    second = BuildPaths.create(root, build_id="build-2")
+    _complete_build(second)
+    with pytest.raises(LifecycleError, match="Multiple staged"):
+        select_staged_build(root)
+    assert select_staged_build(root, build_id="build-2") == second
+    assert list_staged_builds(root) == (first, second)
 
 
 def test_promotion_rejects_unsafe_retirement_token_before_moving_current(tmp_path) -> None:
