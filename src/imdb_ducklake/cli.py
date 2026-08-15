@@ -29,12 +29,13 @@ from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
     list_staged_builds,
+    promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
     select_staged_build,
     temporary_build,
 )
-from imdb_ducklake.lakehouse.validation import validate_catalog
+from imdb_ducklake.lakehouse.validation import validate_build, validate_catalog
 from imdb_ducklake.observability import configure_logging
 from imdb_ducklake.transformation.dbt_runner import run_dbt
 
@@ -237,6 +238,55 @@ def transform_command(
             )
         typer.echo(result.stdout.rstrip())
         typer.echo(f"Transformed and tested build {paths.build_id}; it remains unpromoted.")
+    except ImdbLakehouseError as error:
+        _exit_with_error(error)
+
+
+@app.command("promote")
+def promote_command(
+    build_id: Annotated[
+        str | None,
+        typer.Option("--build-id", help="Promote a specific staged build ID."),
+    ] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            help="Override the repository-relative data directory.",
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ] = None,
+) -> None:
+    """Validate and atomically promote one staged DuckLake build."""
+    try:
+        settings = Settings.load(data_dir=data_dir)
+        configure_logging(settings.log_level)
+        with BuildLock(settings.lakehouse_dir / ".build.lock"):
+            recover_interrupted_promotion(settings.lakehouse_dir)
+            paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+            staged_validation = validate_build(
+                paths,
+                executable=python_executable,
+                environment=environ,
+                working_directory=settings.repository_root,
+            )
+            promoted = promote_build(paths)
+            current_validation = validate_catalog(
+                catalog_path=promoted.catalog_path,
+                storage_dir=promoted.storage_dir,
+                build_id=promoted.build_id,
+                executable=python_executable,
+                environment=environ,
+                working_directory=settings.repository_root,
+            )
+        typer.echo(
+            f"Promoted build {promoted.build_id} to {promoted.current_dir} after validating "
+            f"{staged_validation.relation_count} staged relations and reattaching "
+            f"{current_validation.relation_count} current relations read-only."
+        )
+        for relation, row_count in sorted(current_validation.mart_row_counts.items()):
+            typer.echo(f"  marts.{relation}: {row_count:,} rows")
     except ImdbLakehouseError as error:
         _exit_with_error(error)
 

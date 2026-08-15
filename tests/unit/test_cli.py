@@ -160,6 +160,53 @@ def test_transform_command_runs_dbt_for_staged_build(tmp_path, monkeypatch) -> N
     assert "Transformed and tested build fixture-build; it remains unpromoted." in result.stdout
 
 
+def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, monkeypatch) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    paths = BuildPaths.create(settings.lakehouse_dir, build_id="fixture-build")
+    initialize_build(paths)
+    paths.catalog_path.write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    events: list[str] = []
+
+    def fake_validate_build(received, **kwargs):
+        assert received == paths
+        assert kwargs["working_directory"] == settings.repository_root
+        events.append("validate staged")
+        return SimpleNamespace(relation_count=31)
+
+    def fake_promote(received):
+        assert received == paths
+        events.append("promote")
+        return SimpleNamespace(
+            build_id=paths.build_id,
+            current_dir=settings.current_dir,
+            catalog_path=settings.current_dir / "catalog.duckdb",
+            storage_dir=settings.current_dir / "storage",
+        )
+
+    def fake_validate_catalog(**kwargs):
+        assert kwargs["catalog_path"] == settings.current_dir / "catalog.duckdb"
+        assert kwargs["storage_dir"] == settings.current_dir / "storage"
+        assert kwargs["build_id"] == paths.build_id
+        events.append("validate current")
+        return SimpleNamespace(
+            relation_count=31,
+            mart_row_counts={"mart_title_search": 2},
+        )
+
+    monkeypatch.setattr(cli, "validate_build", fake_validate_build)
+    monkeypatch.setattr(cli, "promote_build", fake_promote)
+    monkeypatch.setattr(cli, "validate_catalog", fake_validate_catalog)
+
+    result = runner.invoke(cli.app, ["promote", "--build-id", paths.build_id])
+
+    assert result.exit_code == 0
+    assert events == ["validate staged", "promote", "validate current"]
+    assert "Promoted build fixture-build" in result.stdout
+    assert "reattaching 31 current relations read-only" in result.stdout
+    assert "marts.mart_title_search: 2 rows" in result.stdout
+
+
 def test_validate_command_automatically_selects_the_only_staged_build(
     tmp_path, monkeypatch
 ) -> None:

@@ -6,9 +6,10 @@ not part of the repository.
 
 ## Commands
 
-```powershell
+```console
 uv run pytest -m smoke tests/smoke/test_full_snapshot.py -q -s
 uv run dbt build --project-dir dbt --profiles-dir dbt
+uv run imdb-lakehouse promote --build-id 20260815T080036Z-bd40cace79aa
 ```
 
 The smoke suite completed with four passing tests in 47.91 seconds. The retained dbt run artifact
@@ -51,8 +52,10 @@ row's `_dlt_load_id` resolved to the matching `raw.ingestion_files.table_name` r
 
 ## Catalog, dbt, and marts
 
-The staged build `20260815T080036Z-bd40cace79aa` passed the fresh-process read-only validation gate.
-All 31 required raw, staging, intermediate, and mart relations were present.
+Build `20260815T080036Z-bd40cace79aa` passed the fresh-process read-only validation gate, was
+atomically promoted to `data/ducklake/current/`, and then passed a second fresh-process read-only
+attachment from its promoted paths. All 31 required raw, staging, intermediate, and mart relations
+were present before and after promotion.
 
 | Mart | Rows |
 | --- | ---: |

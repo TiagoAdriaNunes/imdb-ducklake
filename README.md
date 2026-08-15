@@ -48,7 +48,7 @@ under [`docs/adr/`](docs/adr/README.md).
 
 ## Development
 
-```powershell
+```console
 uv sync --locked
 uv run imdb-lakehouse --help
 uv run ruff check .
@@ -62,7 +62,7 @@ download. Run them deliberately with `uv run pytest -m smoke` after acquiring al
 
 Install the locked dependencies and download all seven IMDb source archives:
 
-```powershell
+```console
 uv sync --locked
 uv run imdb-lakehouse download
 ```
@@ -72,13 +72,13 @@ its `.part` file and resumes from the last saved byte when the server supports r
 
 To download every archive again even when a verified local copy exists:
 
-```powershell
+```console
 uv run imdb-lakehouse download --force
 ```
 
 To use a different repository-relative data directory:
 
-```powershell
+```console
 uv run imdb-lakehouse download --data-dir ./local-imdb-data
 ```
 
@@ -89,7 +89,7 @@ checksums, and acquisition batch IDs are recorded in `data/raw/manifest.json`.
 
 Run the complete safe workflow with one command:
 
-```powershell
+```console
 uv run imdb-lakehouse build
 ```
 
@@ -103,13 +103,13 @@ crash-orphaned workspaces are pruned on the next run.
 Running the command again reuses verified source archives but deliberately creates a fresh full
 snapshot. To reacquire every archive as well, use:
 
-```powershell
+```console
 uv run imdb-lakehouse build --force-download
 ```
 
 The data location is independent of where the repository is cloned:
 
-```powershell
+```console
 uv run imdb-lakehouse build --data-dir ./local-imdb-data
 ```
 
@@ -117,13 +117,26 @@ uv run imdb-lakehouse build --data-dir ./local-imdb-data
 
 Validate the active `current/` build without supplying catalog or storage paths:
 
-```powershell
+```console
 uv run imdb-lakehouse validate
 ```
 
 When no current build exists, the command automatically validates the sole staged build instead.
 It prints the required-relation count and row count for each mart. If multiple staged builds exist,
 select one explicitly with `--build-id`; `--data-dir` uses the same override as the other commands.
+
+## Promote a staged build
+
+Promote an already transformed staged build without repeating acquisition, ingestion, or dbt:
+
+```console
+uv run imdb-lakehouse promote --build-id 20260815T123000Z-abc123
+```
+
+The command holds the single-writer lock, validates the staged catalog through a fresh read-only
+process, atomically moves it to `data/ducklake/current/`, and then reattaches and validates the
+promoted catalog from another fresh process. Omit `--build-id` when exactly one staged build exists.
+Use `--data-dir` for a non-default data root.
 
 ## Exit codes
 
@@ -147,26 +160,26 @@ does not yet have a more specific subtype exits with code 1.
 
 Load all seven retained archives into a new isolated DuckLake build:
 
-```powershell
+```console
 uv run imdb-lakehouse ingest
 ```
 
 The command revalidates every archive against the manifest before loading it. It prints the build
 ID and catalog path, and leaves the result under `data/ducklake/builds/` for inspection. This
-stage-only command does not replace `data/ducklake/current/`; use the full `build` command when the
-result should be validated and promoted. During the load it logs each queued dataset and
+stage-only command does not replace `data/ducklake/current/`; use `promote` after transformation or
+use the full `build` command for one end-to-end operation. During the load it logs each queued dataset and
 dlt's extraction, normalization, and destination progress every few seconds.
 
 Use the same data-directory override as the download command when the archives are elsewhere:
 
-```powershell
+```console
 uv run imdb-lakehouse ingest --data-dir ./local-imdb-data
 ```
 
 If a staged ingestion already exists, the command preserves it and stops instead of repeating the
 load. Discard that unpromoted build and ingest a fresh snapshot explicitly with:
 
-```powershell
+```console
 uv run imdb-lakehouse ingest --replace-staged
 ```
 
@@ -174,7 +187,7 @@ uv run imdb-lakehouse ingest --replace-staged
 
 After ingestion, run every dbt model and data-quality test against the staged DuckLake build:
 
-```powershell
+```console
 uv run imdb-lakehouse transform
 ```
 
@@ -184,13 +197,13 @@ exceed 0.01%; they are not patched in the source data. Large title-search arrays
 as separate rollups to keep peak DuckDB memory bounded. If more than one staged build exists,
 select the build ID printed by ingestion:
 
-```powershell
+```console
 uv run imdb-lakehouse transform --build-id 20260815T123000Z-abc123
 ```
 
 Use `--data-dir` when ingestion used a custom data directory. A successful transformation remains
-staged for inspection; the full `build` command performs its own isolated end-to-end run before
-promotion.
+staged for inspection; run `promote` to validate and activate it, or use the full `build` command to
+perform an isolated end-to-end run before promotion.
 
 ## Query the analytical marts
 
