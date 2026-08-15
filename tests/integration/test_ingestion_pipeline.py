@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import os
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,8 @@ import pytest
 
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
 from imdb_ducklake.acquisition.manifest import ManifestEntry
+from imdb_ducklake.application.build import build_lakehouse
+from imdb_ducklake.config import Settings
 from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.ingestion.pipeline import ingest_snapshot
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
@@ -201,3 +204,61 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
             "SELECT series_tconst, episode_tconst, season_number, episode_number "
             "FROM imdb_lake.marts.mart_series_episodes"
         ).fetchone() == ("tt0001", "tt0002", 1, 1)
+
+
+@pytest.mark.integration
+def test_one_command_builds_validates_and_promotes_fixture_snapshot(tmp_path) -> None:
+    title_rows = (
+        ("tt0001", "movie", "Exámple 東京", "Example", "0", "2020", "\\N", "90", "Drama"),
+        ("tt0002", "tvEpisode", "Episode", "Episode", "0", "2021", "\\N", "45", "Drama"),
+    )
+    artifacts = _snapshot(tmp_path / "raw", title_rows=title_rows)
+    repository_root = Path(__file__).parents[2]
+    settings = Settings(repository_root=repository_root, data_dir=tmp_path / "data")
+    settings.current_dir.mkdir(parents=True)
+    (settings.current_dir / "previous.txt").write_text("known-good", encoding="utf-8")
+
+    class FixtureDownloader:
+        def download_all(self, _datasets, **_kwargs):
+            return artifacts
+
+    dbt_executable = Path(sys.executable).with_name("dbt.exe" if os.name == "nt" else "dbt")
+    result = build_lakehouse(
+        settings=settings,
+        downloader=FixtureDownloader(),
+        dbt_executable=str(dbt_executable),
+        python_executable=sys.executable,
+        environment=os.environ,
+        reserve_bytes=0,
+        temporary_size_factor=1,
+        show_progress=False,
+    )
+
+    assert result.promoted.current_dir == settings.current_dir
+    assert result.validation.relation_count == 31
+    assert result.validation.mart_row_counts["mart_title_search"] == 2
+    assert result.promoted.previous_dir is not None
+    assert (result.promoted.previous_dir / "previous.txt").read_text(encoding="utf-8") == (
+        "known-good"
+    )
+    assert result.promoted.catalog_path.is_file()
+    assert result.promoted.storage_dir.is_dir()
+    promoted_validation = subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "imdb_ducklake.lakehouse.validation",
+            "--catalog",
+            str(result.promoted.catalog_path),
+            "--storage",
+            str(result.promoted.storage_dir),
+            "--build-id",
+            result.build_id,
+        ),
+        cwd=repository_root,
+        env=os.environ,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert promoted_validation.returncode == 0, promoted_validation.stderr
