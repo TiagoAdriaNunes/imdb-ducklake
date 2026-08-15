@@ -1,0 +1,66 @@
+[project]
+name = "imdb-ducklake"
+version = "0.1.0"
+description = "A reproducible IMDb analytics lakehouse built with dlt, DuckLake, dbt, and DuckDB."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { file = "LICENSE" }
+dependencies = [
+    "dbt-duckdb>=1.9,<2",
+    "dlt[ducklake]>=1.29,<2",
+    "httpx>=0.28,<1",
+    "typer>=0.16,<1",
+]
+
+[project.scripts]
+imdb-lakehouse = "imdb_ducklake.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17,<2",
+    "pytest>=8.4,<9",
+    "pytest-cov>=6.2,<8",
+    "respx>=0.22,<1",
+    "ruff>=0.12,<1",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["dlt", "dlt.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "integration: tests that exercise dlt, DuckLake, or dbt",
+    "smoke: tests that require the complete IMDb download",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["imdb_ducklake"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

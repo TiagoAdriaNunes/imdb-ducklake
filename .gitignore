@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Local configuration
+.env
+.dlt/secrets.toml
+
+# Runtime data and state
+data/
+.dlt/pipelines/
+
+# dbt artifacts
+dbt/logs/
+dbt/target/
+dbt/dbt_packages/
+*.duckdb
+*.ducklake
+*.sqlite
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
