@@ -62,3 +62,18 @@ def test_duplicate_table_names_are_rejected(tmp_path) -> None:
 
     with pytest.raises(AcquisitionError, match="duplicate table names"):
         load_manifest(path)
+
+
+def test_manifest_write_failure_has_context(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "manifest.json"
+
+    def fail_temporary_file(**_kwargs):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(
+        "imdb_ducklake.acquisition.manifest.tempfile.NamedTemporaryFile",
+        fail_temporary_file,
+    )
+
+    with pytest.raises(AcquisitionError, match="Could not write manifest"):
+        write_manifest(path, Manifest((_entry(),)))
