@@ -525,6 +525,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dbt-duckdb" },
     { name = "dlt", extra = ["ducklake"] },
+    { name = "duckdb" },
     { name = "httpx" },
     { name = "typer" },
 ]
@@ -542,6 +543,7 @@ dev = [
 requires-dist = [
     { name = "dbt-duckdb", specifier = ">=1.9,<2" },
     { name = "dlt", extras = ["ducklake"], specifier = ">=1.29,<2" },
+    { name = "duckdb", specifier = ">=1.4,<2" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "typer", specifier = ">=0.16,<1" },
 ]

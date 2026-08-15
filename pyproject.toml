@@ -8,6 +8,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "dbt-duckdb>=1.9,<2",
     "dlt[ducklake]>=1.29,<2",
+    "duckdb>=1.4,<2",
     "httpx>=0.28,<1",
     "typer>=0.16,<1",
 ]

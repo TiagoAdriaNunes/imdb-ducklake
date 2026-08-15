@@ -16,3 +16,4 @@ imdb_ducklake:
           alias: imdb_lake
           options:
             data_path: "{{ env_var('IMDB_DUCKLAKE_STORAGE', '../data/ducklake/current/storage') }}"
+            override_data_path: true

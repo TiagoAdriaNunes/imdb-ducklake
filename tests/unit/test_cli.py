@@ -43,6 +43,36 @@ def test_download_command_maps_domain_error_to_exit_code(monkeypatch) -> None:
     assert "Error: source unavailable" in result.output
 
 
+def test_build_command_runs_complete_orchestrator_and_reports_promotion(
+    tmp_path, monkeypatch
+) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    received = None
+
+    def fake_build(**kwargs):
+        nonlocal received
+        received = kwargs
+        return SimpleNamespace(
+            build_id="complete-build",
+            transformation=SimpleNamespace(stdout="dbt passed\n"),
+            validation=SimpleNamespace(relation_count=31),
+            promoted=SimpleNamespace(current_dir=settings.current_dir),
+        )
+
+    monkeypatch.setattr(cli, "build_lakehouse", fake_build)
+
+    result = runner.invoke(cli.app, ["build", "--force-download"])
+
+    assert result.exit_code == 0
+    assert received is not None
+    assert received["settings"] == settings
+    assert received["force_download"] is True
+    assert "dbt passed" in result.stdout
+    assert "Promoted build complete-build" in result.stdout
+    assert "validating 31 relations" in result.stdout
+
+
 def test_ingest_command_loads_isolated_build_and_reports_catalog(tmp_path, monkeypatch) -> None:
     settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
     artifacts = (object(),) * 7
@@ -118,6 +148,64 @@ def test_transform_command_runs_dbt_for_staged_build(tmp_path, monkeypatch) -> N
     assert result.exit_code == 0
     assert "dbt completed" in result.stdout
     assert "Transformed and tested build fixture-build; it remains unpromoted." in result.stdout
+
+
+def test_validate_command_automatically_selects_the_only_staged_build(
+    tmp_path, monkeypatch
+) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    paths = BuildPaths.create(settings.lakehouse_dir, build_id="staged-build")
+    initialize_build(paths)
+    paths.catalog_path.write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    received = None
+
+    def fake_validate(**kwargs):
+        nonlocal received
+        received = kwargs
+        return SimpleNamespace(
+            build_id="staged-build",
+            relation_count=31,
+            mart_row_counts={"mart_title_search": 2},
+        )
+
+    monkeypatch.setattr(cli, "validate_catalog", fake_validate)
+
+    result = runner.invoke(cli.app, ["validate"])
+
+    assert result.exit_code == 0
+    assert received is not None
+    assert received["catalog_path"] == paths.catalog_path
+    assert received["storage_dir"] == paths.storage_dir
+    assert "Validated staged-build: 31 required relations." in result.stdout
+    assert "marts.mart_title_search: 2 rows" in result.stdout
+
+
+def test_validate_command_prefers_current_without_requiring_arguments(
+    tmp_path, monkeypatch
+) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    settings.current_dir.mkdir(parents=True)
+    catalog_path = settings.current_dir / "catalog.duckdb"
+    catalog_path.write_text("fixture", encoding="utf-8")
+    (settings.current_dir / "storage").mkdir()
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    received = None
+
+    def fake_validate(**kwargs):
+        nonlocal received
+        received = kwargs
+        return SimpleNamespace(build_id="current", relation_count=31, mart_row_counts={})
+
+    monkeypatch.setattr(cli, "validate_catalog", fake_validate)
+
+    result = runner.invoke(cli.app, ["validate"])
+
+    assert result.exit_code == 0
+    assert received is not None
+    assert received["catalog_path"] == catalog_path
+    assert received["build_id"] == "current"
+    assert "Validated current: 31 required relations." in result.stdout
 
 
 def test_main_invokes_typer_application(monkeypatch) -> None:
