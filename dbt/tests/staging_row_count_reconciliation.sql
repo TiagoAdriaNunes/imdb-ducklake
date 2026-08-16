@@ -5,39 +5,39 @@ with row_counts as (
         (select count(*) from {{ ref('stg_imdb__title_akas') }}) as staging_count
     union all
     select
-        'title_basics',
-        (select count(*) from {{ source('imdb_raw', 'title_basics') }}),
-        (select count(*) from {{ ref('stg_imdb__title_basics') }})
+        'title_basics' as relation_name,
+        (select count(*) from {{ source('imdb_raw', 'title_basics') }}) as raw_count,
+        (select count(*) from {{ ref('stg_imdb__title_basics') }}) as staging_count
     union all
     select
-        'title_crew',
-        (select count(*) from {{ source('imdb_raw', 'title_crew') }}),
-        (select count(*) from {{ ref('stg_imdb__title_crew') }})
+        'title_crew' as relation_name,
+        (select count(*) from {{ source('imdb_raw', 'title_crew') }}) as raw_count,
+        (select count(*) from {{ ref('stg_imdb__title_crew') }}) as staging_count
     union all
     select
-        'title_episode',
-        (select count(*) from {{ source('imdb_raw', 'title_episode') }}),
-        (select count(*) from {{ ref('stg_imdb__title_episode') }})
+        'title_episode' as relation_name,
+        (select count(*) from {{ source('imdb_raw', 'title_episode') }}) as raw_count,
+        (select count(*) from {{ ref('stg_imdb__title_episode') }}) as staging_count
     union all
     select
-        'title_principals',
-        (select count(*) from {{ source('imdb_raw', 'title_principals') }}),
-        (select count(*) from {{ ref('stg_imdb__title_principals') }})
+        'title_principals' as relation_name,
+        (select count(*) from {{ source('imdb_raw', 'title_principals') }}) as raw_count,
+        (select count(*) from {{ ref('stg_imdb__title_principals') }}) as staging_count
     union all
     select
-        'title_ratings',
-        (select count(*) from {{ source('imdb_raw', 'title_ratings') }}),
-        (select count(*) from {{ ref('stg_imdb__title_ratings') }})
+        'title_ratings' as relation_name,
+        (select count(*) from {{ source('imdb_raw', 'title_ratings') }}) as raw_count,
+        (select count(*) from {{ ref('stg_imdb__title_ratings') }}) as staging_count
     union all
     select
-        'name_basics',
-        (select count(*) from {{ source('imdb_raw', 'name_basics') }}),
-        (select count(*) from {{ ref('stg_imdb__name_basics') }})
+        'name_basics' as relation_name,
+        (select count(*) from {{ source('imdb_raw', 'name_basics') }}) as raw_count,
+        (select count(*) from {{ ref('stg_imdb__name_basics') }}) as staging_count
     union all
     select
-        'ingestion_files',
-        (select count(*) from {{ source('imdb_raw', 'ingestion_files') }}),
-        (select count(*) from {{ ref('stg_imdb__ingestion_files') }})
+        'ingestion_files' as relation_name,
+        (select count(*) from {{ source('imdb_raw', 'ingestion_files') }}) as raw_count,
+        (select count(*) from {{ ref('stg_imdb__ingestion_files') }}) as staging_count
 )
 
 select *
