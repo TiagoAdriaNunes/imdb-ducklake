@@ -26,6 +26,7 @@ class ManifestEntry:
     sha256: str
     downloaded_at: str
     batch_id: str
+    row_count: int | None = None
     etag: str | None = None
     last_modified: str | None = None
     content_type: str | None = None
@@ -44,6 +45,7 @@ class ManifestEntry:
                 sha256=_required_string(value, "sha256"),
                 downloaded_at=_required_string(value, "downloaded_at"),
                 batch_id=_required_string(value, "batch_id"),
+                row_count=_optional_non_negative_int(value, "row_count"),
                 etag=_optional_string(value, "etag"),
                 last_modified=_optional_string(value, "last_modified"),
                 content_type=_optional_string(value, "content_type"),
@@ -144,4 +146,13 @@ def _required_non_negative_int(value: dict[str, Any], key: str) -> int:
     field = value.get(key)
     if not isinstance(field, int) or isinstance(field, bool) or field < 0:
         raise AcquisitionError(f"Manifest field {key!r} must be a non-negative integer")
+    return field
+
+
+def _optional_non_negative_int(value: dict[str, Any], key: str) -> int | None:
+    field = value.get(key)
+    if field is None:
+        return None
+    if not isinstance(field, int) or isinstance(field, bool) or field < 0:
+        raise AcquisitionError(f"Manifest field {key!r} must be a non-negative integer or null")
     return field

@@ -1,5 +1,6 @@
 import gzip
 import hashlib
+import json
 from datetime import UTC, datetime
 
 import httpx
@@ -66,6 +67,7 @@ def test_downloads_valid_archive_and_records_manifest(tmp_path) -> None:
     assert entry.sha256 == hashlib.sha256(body).hexdigest()
     assert entry.downloaded_at == NOW.isoformat()
     assert entry.batch_id == "batch-1"
+    assert entry.row_count == 1
     assert entry.etag == '"abc"'
     assert not list(raw_dir.glob("*.part"))
 
@@ -94,6 +96,28 @@ def test_reuses_archive_when_manifest_and_digest_match(tmp_path) -> None:
         manifest_path=manifest_path,
     )
     assert retained == first
+
+
+def test_loading_legacy_manifest_backfills_row_count(tmp_path) -> None:
+    body = _archive()
+    raw_dir, manifest_path = _paths(tmp_path)
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, stream=httpx.ByteStream(body))
+        )
+    ) as client:
+        Downloader(client, clock=lambda: NOW).download_all(
+            [SPEC], raw_dir=raw_dir, manifest_path=manifest_path
+        )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["entries"][0]["row_count"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    retained = load_verified_artifacts([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+
+    assert retained[0].manifest_entry.row_count == 1
+    assert load_manifest(manifest_path).get(SPEC.table_name).row_count == 1
 
 
 def test_retained_artifacts_require_manifest_and_matching_checksum(tmp_path) -> None:

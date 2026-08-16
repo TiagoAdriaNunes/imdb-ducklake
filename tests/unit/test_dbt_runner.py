@@ -1,4 +1,6 @@
+import os
 import subprocess
+import sys
 
 import pytest
 
@@ -77,3 +79,28 @@ def test_rejects_incomplete_build_and_wraps_dbt_failure(tmp_path) -> None:
             environment={},
             runner=fail,
         )
+
+
+def test_streams_dbt_stdout_and_stderr_while_retaining_output(tmp_path) -> None:
+    paths, project = _inputs(tmp_path)
+    events: list[tuple[str, str]] = []
+
+    result = run_dbt(
+        (
+            "-c",
+            "import sys; print('model started', flush=True); "
+            "print('model warning', file=sys.stderr, flush=True)",
+        ),
+        build_paths=paths,
+        project_dir=project,
+        profiles_dir=project,
+        controller_path=tmp_path / "controller.duckdb",
+        executable=sys.executable,
+        environment=os.environ,
+        output_handler=lambda stream, line: events.append((stream, line)),
+    )
+
+    assert result.stdout == "model started\n"
+    assert result.stderr == "model warning\n"
+    assert ("stdout", "model started") in events
+    assert ("stderr", "model warning") in events

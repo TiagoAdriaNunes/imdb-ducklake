@@ -1,15 +1,19 @@
 """Command-line composition root for the IMDb DuckLake application."""
 
+from dataclasses import dataclass
 from enum import IntEnum
 from os import environ
 from os import name as os_name
 from pathlib import Path
 from sys import executable as python_executable
 from typing import Annotated, NoReturn
+from uuid import uuid4
 
 import httpx
 import typer
+from dlt.common.runtime.collector_base import Collector
 
+from imdb_ducklake import __version__
 from imdb_ducklake.acquisition.downloader import Downloader, load_verified_artifacts
 from imdb_ducklake.application.build import build_lakehouse
 from imdb_ducklake.config import Settings
@@ -25,6 +29,7 @@ from imdb_ducklake.exceptions import (
     ValidationError,
 )
 from imdb_ducklake.ingestion.pipeline import ingest_snapshot
+from imdb_ducklake.ingestion.progress import RichProgressCollector, StructuredLogCollector
 from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
@@ -36,7 +41,12 @@ from imdb_ducklake.lakehouse.lifecycle import (
     temporary_build,
 )
 from imdb_ducklake.lakehouse.validation import validate_build, validate_catalog
-from imdb_ducklake.observability import configure_logging
+from imdb_ducklake.observability import (
+    configure_logging,
+    get_console,
+    rich_progress_enabled,
+    start_run_context,
+)
 from imdb_ducklake.transformation.dbt_runner import run_dbt
 
 app = typer.Typer(
@@ -59,13 +69,34 @@ class ExitCode(IntEnum):
     LIFECYCLE_ERROR = 16
 
 
+@dataclass(frozen=True, slots=True)
+class CliRuntime:
+    """Options and correlation context shared by one CLI invocation."""
+
+    log_format: str | None
+    run_id: str
+
+
 @app.callback()
-def root_command() -> None:
+def root_command(
+    ctx: typer.Context,
+    log_format: Annotated[
+        str | None,
+        typer.Option(
+            "--log-format",
+            help="Render diagnostic logs as human-readable console text or JSON Lines.",
+            envvar="IMDB_LAKEHOUSE_LOG_FORMAT",
+            metavar="console|json",
+        ),
+    ] = None,
+) -> None:
     """Select a lakehouse operation."""
+    ctx.obj = CliRuntime(log_format=log_format, run_id=str(uuid4()))
 
 
 @app.command("build")
 def build_command(
+    ctx: typer.Context,
     force_download: Annotated[
         bool,
         typer.Option(
@@ -85,13 +116,12 @@ def build_command(
 ) -> None:
     """Build, validate, and atomically promote a complete IMDb lakehouse."""
     try:
-        settings = Settings.load(data_dir=data_dir)
-        configure_logging(settings.log_level)
+        settings = _settings_for_command(ctx, data_dir=data_dir)
         timeout = httpx.Timeout(connect=30, read=120, write=30, pool=30)
         with httpx.Client(
             timeout=timeout,
             follow_redirects=True,
-            headers={"User-Agent": "imdb-ducklake/0.1"},
+            headers={"User-Agent": f"imdb-ducklake/{__version__}"},
         ) as client:
             result = build_lakehouse(
                 settings=settings,
@@ -100,8 +130,8 @@ def build_command(
                 python_executable=python_executable,
                 environment=environ,
                 force_download=force_download,
+                progress_factory=lambda build_id: _progress_collector(settings, build_id),
             )
-        typer.echo(result.transformation.stdout.rstrip())
         typer.echo(
             f"Promoted build {result.build_id} to {result.promoted.current_dir} "
             f"after validating {result.validation.relation_count} relations."
@@ -112,6 +142,7 @@ def build_command(
 
 @app.command("download")
 def download_command(
+    ctx: typer.Context,
     force: Annotated[
         bool,
         typer.Option("--force", help="Download every archive even when a verified copy exists."),
@@ -128,13 +159,12 @@ def download_command(
 ) -> None:
     """Download and verify all seven IMDb source archives."""
     try:
-        settings = Settings.load(data_dir=data_dir)
-        configure_logging(settings.log_level)
+        settings = _settings_for_command(ctx, data_dir=data_dir)
         timeout = httpx.Timeout(connect=30, read=120, write=30, pool=30)
         with httpx.Client(
             timeout=timeout,
             follow_redirects=True,
-            headers={"User-Agent": "imdb-ducklake/0.1"},
+            headers={"User-Agent": f"imdb-ducklake/{__version__}"},
         ) as client:
             artifacts = Downloader(client).download_all(
                 DATASETS,
@@ -150,6 +180,7 @@ def download_command(
 
 @app.command("ingest")
 def ingest_command(
+    ctx: typer.Context,
     replace_staged: Annotated[
         bool,
         typer.Option(
@@ -169,8 +200,7 @@ def ingest_command(
 ) -> None:
     """Load retained verified archives into an isolated raw DuckLake build."""
     try:
-        settings = Settings.load(data_dir=data_dir)
-        configure_logging(settings.log_level)
+        settings = _settings_for_command(ctx, data_dir=data_dir)
         artifacts = load_verified_artifacts(
             DATASETS,
             raw_dir=settings.raw_dir,
@@ -193,7 +223,7 @@ def ingest_command(
                     artifacts,
                     build_paths=paths,
                     pipelines_dir=settings.dlt_pipelines_dir,
-                    show_progress=True,
+                    progress=_progress_collector(settings, paths.build_id),
                 )
         typer.echo(
             f"Loaded {len(artifacts)} archives into build {paths.build_id} "
@@ -206,6 +236,7 @@ def ingest_command(
 
 @app.command("transform")
 def transform_command(
+    ctx: typer.Context,
     build_id: Annotated[
         str | None,
         typer.Option("--build-id", help="Transform a specific staged build ID."),
@@ -222,12 +253,11 @@ def transform_command(
 ) -> None:
     """Run all dbt models and tests against one staged DuckLake build."""
     try:
-        settings = Settings.load(data_dir=data_dir)
-        configure_logging(settings.log_level)
+        settings = _settings_for_command(ctx, data_dir=data_dir)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
             recover_interrupted_promotion(settings.lakehouse_dir)
             paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
-            result = run_dbt(
+            run_dbt(
                 ("build",),
                 build_paths=paths,
                 project_dir=settings.dbt_project_dir,
@@ -236,7 +266,6 @@ def transform_command(
                 executable=str(_dbt_executable()),
                 environment=environ,
             )
-        typer.echo(result.stdout.rstrip())
         typer.echo(f"Transformed and tested build {paths.build_id}; it remains unpromoted.")
     except ImdbLakehouseError as error:
         _exit_with_error(error)
@@ -244,10 +273,21 @@ def transform_command(
 
 @app.command("promote")
 def promote_command(
+    ctx: typer.Context,
     build_id: Annotated[
         str | None,
         typer.Option("--build-id", help="Promote a specific staged build ID."),
     ] = None,
+    prune: Annotated[
+        bool,
+        typer.Option(
+            "--prune",
+            help=(
+                "After successful promotion and validation, remove other staged builds and "
+                "retain only the newest rollback build."
+            ),
+        ),
+    ] = False,
     data_dir: Annotated[
         Path | None,
         typer.Option(
@@ -260,8 +300,7 @@ def promote_command(
 ) -> None:
     """Validate and atomically promote one staged DuckLake build."""
     try:
-        settings = Settings.load(data_dir=data_dir)
-        configure_logging(settings.log_level)
+        settings = _settings_for_command(ctx, data_dir=data_dir)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
             recover_interrupted_promotion(settings.lakehouse_dir)
             paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
@@ -280,6 +319,7 @@ def promote_command(
                 environment=environ,
                 working_directory=settings.repository_root,
             )
+            removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1) if prune else ()
         typer.echo(
             f"Promoted build {promoted.build_id} to {promoted.current_dir} after validating "
             f"{staged_validation.relation_count} staged relations and reattaching "
@@ -287,12 +327,17 @@ def promote_command(
         )
         for relation, row_count in sorted(current_validation.mart_row_counts.items()):
             typer.echo(f"  marts.{relation}: {row_count:,} rows")
+        if prune:
+            typer.echo(
+                f"Pruned {len(removed)} obsolete build workspace(s); retained one rollback build."
+            )
     except ImdbLakehouseError as error:
         _exit_with_error(error)
 
 
 @app.command("validate")
 def validate_command(
+    ctx: typer.Context,
     build_id: Annotated[
         str | None,
         typer.Option(
@@ -312,8 +357,7 @@ def validate_command(
 ) -> None:
     """Validate the current build, or the sole staged build when no current exists."""
     try:
-        settings = Settings.load(data_dir=data_dir)
-        configure_logging(settings.log_level)
+        settings = _settings_for_command(ctx, data_dir=data_dir)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
             recover_interrupted_promotion(settings.lakehouse_dir)
             if build_id is not None:
@@ -352,6 +396,25 @@ def main() -> None:
 
 def _dbt_executable() -> Path:
     return Path(python_executable).with_name("dbt.exe" if os_name == "nt" else "dbt")
+
+
+def _settings_for_command(ctx: typer.Context, *, data_dir: Path | None) -> Settings:
+    runtime = ctx.obj
+    if not isinstance(runtime, CliRuntime):
+        runtime = CliRuntime(log_format=None, run_id=str(uuid4()))
+    settings = Settings.load(data_dir=data_dir, log_format=runtime.log_format)
+    configure_logging(settings.log_level, settings.log_format)
+    start_run_context(runtime.run_id)
+    return settings
+
+
+def _progress_collector(settings: Settings, build_id: str) -> Collector:
+    if rich_progress_enabled():
+        return RichProgressCollector(console=get_console())
+    return StructuredLogCollector(
+        build_id=build_id,
+        log_period=settings.progress_interval_seconds,
+    )
 
 
 def _exit_code_for(error: ImdbLakehouseError) -> ExitCode:

@@ -11,6 +11,7 @@ from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import IngestionError
 from imdb_ducklake.ingestion import pipeline as ingestion_pipeline
 from imdb_ducklake.ingestion.pipeline import ingest_snapshot
+from imdb_ducklake.ingestion.progress import StructuredLogCollector
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
 
 
@@ -71,7 +72,7 @@ def test_dlt_startup_failure_is_wrapped_with_catalog_context(tmp_path, monkeypat
             artifacts,
             build_paths=paths,
             pipelines_dir=tmp_path / "pipelines",
-            show_progress=True,
+            progress=StructuredLogCollector(build_id=paths.build_id),
         )
 
     assert isinstance(raised.value.__cause__, RuntimeError)

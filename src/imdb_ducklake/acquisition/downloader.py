@@ -7,7 +7,7 @@ import hashlib
 import os
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -51,13 +51,20 @@ def load_verified_artifacts(
         raise ValueError("chunk_size must be at least one")
     manifest = load_manifest(manifest_path)
     artifacts: list[VerifiedArtifact] = []
+    manifest_changed = False
     for dataset in datasets:
         entry = manifest.get(dataset.table_name)
         if entry is None:
             raise AcquisitionError(f"Manifest has no verified entry for {dataset.file_name}")
         path = raw_dir / dataset.file_name
-        _verify_retained_artifact(dataset, path, entry, chunk_size=chunk_size)
-        artifacts.append(VerifiedArtifact(dataset, path, entry))
+        row_count = _verify_retained_artifact(dataset, path, entry, chunk_size=chunk_size)
+        verified_entry = replace(entry, row_count=row_count)
+        if verified_entry != entry:
+            manifest = manifest.upsert(verified_entry)
+            manifest_changed = True
+        artifacts.append(VerifiedArtifact(dataset, path, verified_entry))
+    if manifest_changed:
+        write_manifest(manifest_path, manifest)
     return tuple(artifacts)
 
 
@@ -101,13 +108,14 @@ class Downloader:
         for dataset in datasets:
             target = raw_dir / dataset.file_name
             current_entry = manifest.get(dataset.table_name)
-            if (
-                not force
-                and current_entry is not None
-                and self._can_reuse(dataset, target, current_entry)
-            ):
-                artifacts.append(VerifiedArtifact(dataset, target, current_entry))
-                continue
+            if not force and current_entry is not None:
+                reusable_entry = self._reusable_entry(dataset, target, current_entry)
+                if reusable_entry is not None:
+                    if reusable_entry != current_entry:
+                        manifest = manifest.upsert(reusable_entry)
+                        write_manifest(manifest_path, manifest)
+                    artifacts.append(VerifiedArtifact(dataset, target, reusable_entry))
+                    continue
 
             entry = self._download_with_retries(
                 dataset,
@@ -120,22 +128,22 @@ class Downloader:
 
         return tuple(artifacts)
 
-    def _can_reuse(
+    def _reusable_entry(
         self,
         dataset: DatasetSpec,
         target: Path,
         entry: ManifestEntry,
-    ) -> bool:
+    ) -> ManifestEntry | None:
         try:
-            _verify_retained_artifact(
+            row_count = _verify_retained_artifact(
                 dataset,
                 target,
                 entry,
                 chunk_size=self._chunk_size,
             )
         except AcquisitionError:
-            return False
-        return True
+            return None
+        return replace(entry, row_count=row_count)
 
     def _download_with_retries(
         self,
@@ -243,7 +251,7 @@ class Downloader:
                     )
 
                 try:
-                    _validate_archive(temporary, dataset)
+                    row_count = _validate_archive(temporary, dataset)
                 except AcquisitionError as error:
                     temporary.unlink(missing_ok=True)
                     if resumed:
@@ -261,6 +269,7 @@ class Downloader:
                     sha256=digest.hexdigest(),
                     downloaded_at=self._clock().astimezone(UTC).isoformat(),
                     batch_id=batch_id,
+                    row_count=row_count,
                     etag=response.headers.get("etag"),
                     last_modified=response.headers.get("last-modified"),
                     content_type=response.headers.get("content-type"),
@@ -315,7 +324,7 @@ def _verify_retained_artifact(
     entry: ManifestEntry,
     *,
     chunk_size: int,
-) -> None:
+) -> int:
     if (
         entry.dataset != dataset.name
         or entry.file_name != dataset.file_name
@@ -328,10 +337,10 @@ def _verify_retained_artifact(
     size_bytes, sha256 = _hash_file(path, chunk_size)
     if size_bytes != entry.size_bytes or sha256 != entry.sha256:
         raise AcquisitionError(f"Checksum does not match manifest for {dataset.file_name}")
-    _validate_archive(path, dataset)
+    return _validate_archive(path, dataset)
 
 
-def _validate_archive(path: Path, dataset: DatasetSpec) -> None:
+def _validate_archive(path: Path, dataset: DatasetSpec) -> int:
     try:
         with gzip.open(path, "rb") as source:
             header_bytes = source.readline()
@@ -341,8 +350,16 @@ def _validate_archive(path: Path, dataset: DatasetSpec) -> None:
                     f"Header mismatch for {dataset.file_name}: "
                     f"expected {dataset.headers!r}, received {actual_header!r}"
                 )
-            while source.read(1024 * 1024):
-                pass
+            row_count = 0
+            has_data = False
+            last_byte = b""
+            while chunk := source.read(1024 * 1024):
+                has_data = True
+                row_count += chunk.count(b"\n")
+                last_byte = chunk[-1:]
+            if has_data and last_byte != b"\n":
+                row_count += 1
+            return row_count
     except AcquisitionError:
         raise
     except (gzip.BadGzipFile, EOFError, OSError, UnicodeError) as error:

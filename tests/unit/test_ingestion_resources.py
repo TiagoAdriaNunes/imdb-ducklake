@@ -36,6 +36,7 @@ def _artifact(tmp_path, rows: tuple[tuple[str, str], ...] = (("id1", "\\N"),)):
         sha256=hashlib.sha256(compressed).hexdigest(),
         downloaded_at=datetime(2026, 8, 15, tzinfo=UTC).isoformat(),
         batch_id="batch-1",
+        row_count=len(rows),
     )
     return VerifiedArtifact(SPEC, path, entry)
 
@@ -57,6 +58,7 @@ def test_raw_resource_preserves_headers_strings_and_null_literal(tmp_path) -> No
     ]
     assert metadata[0]["table_name"] == SPEC.table_name
     assert metadata[0]["batch_id"] == "batch-1"
+    assert metadata[0]["row_count"] == 2
 
 
 def test_resources_require_unique_existing_verified_artifacts(tmp_path) -> None:
