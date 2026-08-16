@@ -6,12 +6,14 @@ from os import environ
 from os import name as os_name
 from pathlib import Path
 from sys import executable as python_executable
+from time import monotonic
 from typing import Annotated, NoReturn
 from uuid import uuid4
 
 import httpx
 import typer
 from dlt.common.runtime.collector_base import Collector
+from loguru import logger
 
 from imdb_ducklake import __version__
 from imdb_ducklake.acquisition.downloader import Downloader, load_verified_artifacts
@@ -33,6 +35,7 @@ from imdb_ducklake.ingestion.progress import RichProgressCollector, StructuredLo
 from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
+    checkpoint_lakehouse,
     list_staged_builds,
     promote_build,
     prune_obsolete_builds,
@@ -311,6 +314,7 @@ def promote_command(
                 working_directory=settings.repository_root,
             )
             promoted = promote_build(paths)
+            checkpoint_lakehouse(promoted.catalog_path, promoted.storage_dir)
             current_validation = validate_catalog(
                 catalog_path=promoted.catalog_path,
                 storage_dir=promoted.storage_dir,
@@ -386,6 +390,65 @@ def validate_command(
         for relation, row_count in sorted(result.mart_row_counts.items()):
             typer.echo(f"  marts.{relation}: {row_count:,} rows")
     except ImdbLakehouseError as error:
+        _exit_with_error(error)
+
+
+@app.command("checkpoint")
+def checkpoint_command(
+    ctx: typer.Context,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            help="Override the repository-relative data directory.",
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ] = None,
+) -> None:
+    """Checkpoint and compact the active current DuckLake build."""
+    started = monotonic()
+    checkpoint_logger = logger
+    try:
+        settings = _settings_for_command(ctx, data_dir=data_dir)
+        catalog_path = settings.current_dir / "catalog.duckdb"
+        storage_dir = settings.current_dir / "storage"
+        checkpoint_logger = logger.bind(
+            target="current",
+            catalog=str(catalog_path),
+        )
+        with BuildLock(settings.lakehouse_dir / ".build.lock"):
+            recover_interrupted_promotion(settings.lakehouse_dir)
+            if not catalog_path.is_file():
+                raise LifecycleError(f"Current DuckLake catalog does not exist: {catalog_path}")
+            if not storage_dir.is_dir():
+                raise LifecycleError(f"Current DuckLake storage does not exist: {storage_dir}")
+            checkpoint_logger.info(
+                "Checkpoint started",
+                event_code="checkpoint_started",
+                stage="checkpoint",
+                status="started",
+            )
+            checkpoint_lakehouse(catalog_path, storage_dir)
+        elapsed_seconds = round(monotonic() - started, 2)
+        checkpoint_logger.info(
+            "Checkpoint completed",
+            event_code="checkpoint_completed",
+            stage="checkpoint",
+            status="completed",
+            elapsed_seconds=elapsed_seconds,
+        )
+        typer.echo(f"Checkpointed current lakehouse in {elapsed_seconds:.2f} seconds.")
+    except ImdbLakehouseError as error:
+        checkpoint_logger.error(
+            "Checkpoint failed",
+            event_code="checkpoint_failed",
+            stage="checkpoint",
+            status="failed",
+            elapsed_seconds=round(monotonic() - started, 2),
+            error_type=type(error).__name__,
+            error_message=str(error),
+        )
         _exit_with_error(error)
 
 

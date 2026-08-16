@@ -72,6 +72,7 @@ def _install_successful_stages(monkeypatch) -> None:
         "validate_build",
         lambda paths, **_kwargs: ValidationResult(paths.build_id, 31, {"mart": 1}),
     )
+    monkeypatch.setattr(build_module, "checkpoint_lakehouse", lambda *_args, **_kwargs: None)
 
 
 def test_build_runs_all_gates_and_promotes_only_after_validation(tmp_path, monkeypatch) -> None:

@@ -21,6 +21,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     BuildPaths,
     PromotedBuild,
     SpaceBudget,
+    checkpoint_lakehouse,
     ensure_free_space,
     promote_build,
     prune_obsolete_builds,
@@ -213,6 +214,14 @@ def build_lakehouse(
                 stage="promotion",
                 status="completed",
                 current=str(promoted.current_dir),
+            )
+
+            checkpoint_lakehouse(promoted.catalog_path, promoted.storage_dir)
+            build_logger.info(
+                "Checkpoint completed",
+                event_code="checkpoint_completed",
+                stage="checkpoint",
+                status="completed",
             )
 
     logger.info(

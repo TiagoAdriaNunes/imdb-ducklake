@@ -167,6 +167,19 @@ process, atomically moves it to `data/ducklake/current/`, and then reattaches an
 promoted catalog from another fresh process. Omit `--build-id` when exactly one staged build exists.
 Use `--data-dir` for a non-default data root.
 
+## Checkpoint the current lakehouse
+
+Compact the active DuckLake build and expire obsolete snapshots without rerunning acquisition,
+ingestion, dbt, validation, or promotion:
+
+```console
+uv run imdb-lakehouse checkpoint
+```
+
+The command acquires the lakehouse build lock and operates only on `data/ducklake/current/`. It
+emits structured start, completion, and failure logs. Use `--data-dir` when the lakehouse uses a
+non-default data root.
+
 ## Exit codes
 
 Expected failures use stable, category-specific process exit codes so local scripts and schedulers

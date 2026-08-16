@@ -221,6 +221,32 @@ def promote_build(
     )
 
 
+def checkpoint_lakehouse(catalog_path: Path, storage_dir: Path) -> None:
+    """Run DuckLake's CHECKPOINT to expire snapshots and compact small files."""
+    import duckdb
+
+    connection = duckdb.connect(":memory:")
+    try:
+        connection.execute("LOAD ducklake")
+        catalog = _sql_string(f"ducklake:{catalog_path.resolve().as_posix()}")
+        storage = _sql_string(storage_dir.resolve().as_posix())
+        connection.execute(
+            f"ATTACH {catalog} AS imdb_lake (DATA_PATH {storage}, OVERRIDE_DATA_PATH true)"
+        )
+        connection.execute("USE imdb_lake")
+        connection.execute("CHECKPOINT")
+    except Exception as error:
+        raise LifecycleError(
+            f"Could not checkpoint the DuckLake catalog: {type(error).__name__}: {error}"
+        ) from error
+    finally:
+        connection.close()
+
+
+def _sql_string(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 def recover_interrupted_promotion(lakehouse_dir: Path) -> bool:
     """Reconcile an interrupted promotion journal, preferring the prior valid build."""
     root = lakehouse_dir.resolve()
