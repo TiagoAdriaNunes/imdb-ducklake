@@ -8,7 +8,8 @@
 The project needed one centralized, tested logging configuration that could emit concise console
 output for interactive local runs and newline-delimited JSON for CI, schedulers, and log
 processors, while routing standard-library records from `dlt`, `dbt`'s subprocess output, and
-other dependencies through the same sinks. `PLAN.md` originally proposed `structlog` for this role.
+other dependencies through the same sinks. The project's original design proposed `structlog` for
+this role.
 
 ## Decision
 

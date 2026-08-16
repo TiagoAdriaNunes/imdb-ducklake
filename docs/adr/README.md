@@ -9,3 +9,4 @@ should add a superseding ADR rather than rewriting history.
 - [0004: Refresh IMDb data as full snapshots](0004-full-snapshot-refreshes.md)
 - [0005: Use GitHub as the canonical source repository](0005-github-canonical-repository.md)
 - [0006: Use Loguru for structured application logging](0006-loguru-structured-logging.md)
+- [0007: Local single-user reliability policy](0007-local-reliability-policy.md)
