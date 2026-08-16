@@ -133,3 +133,24 @@ def test_default_output_handler_removes_dbt_noise_from_console(tmp_path) -> None
     assert "dbt |  |" not in output
     assert "dbt_stream=" not in output
     assert "dbt_message=" not in output
+
+
+def test_environment_secrets_never_reach_logged_output(tmp_path) -> None:
+    paths, project = _inputs(tmp_path)
+    stream = StringIO()
+    configure_logging("INFO", "json", stream=stream)
+    start_run_context("run-dbt-secrets")
+
+    run_dbt(
+        ("-c", "print('model started', flush=True)"),
+        build_paths=paths,
+        project_dir=project,
+        profiles_dir=project,
+        controller_path=tmp_path / "controller.duckdb",
+        executable=sys.executable,
+        environment={**os.environ, "IMDB_LAKEHOUSE_SECRET_TOKEN": "s3cr3t-value"},
+    )
+
+    output = stream.getvalue()
+    assert "s3cr3t-value" not in output
+    assert "IMDB_LAKEHOUSE_SECRET_TOKEN" not in output
