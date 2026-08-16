@@ -1,3 +1,11 @@
+# GNU Make on Windows defaults recipes to cmd.exe unless it can auto-find sh.exe/bash.exe on
+# PATH, which depends on which terminal launched `make` (works from Git Bash, not from a plain
+# PowerShell/cmd session whose PATH only has Git\cmd, not Git\bin). publish-docs' POSIX `if [ ]`
+# syntax needs a real shell, so pin one explicitly rather than depend on the invoking terminal.
+ifeq ($(OS),Windows_NT)
+SHELL := C:/Program Files/Git/bin/bash.exe
+endif
+
 GH_PAGES_DIR := ../imdb-ducklake-gh-pages
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
