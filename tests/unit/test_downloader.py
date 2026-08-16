@@ -2,6 +2,7 @@ import gzip
 import hashlib
 import json
 from datetime import UTC, datetime
+from io import StringIO
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ from imdb_ducklake.acquisition.downloader import Downloader, load_verified_artif
 from imdb_ducklake.acquisition.manifest import load_manifest
 from imdb_ducklake.datasets import DatasetSpec
 from imdb_ducklake.exceptions import AcquisitionError
+from imdb_ducklake.observability import configure_logging
 
 SPEC = DatasetSpec(
     name="example",
@@ -96,6 +98,31 @@ def test_reuses_archive_when_manifest_and_digest_match(tmp_path) -> None:
         manifest_path=manifest_path,
     )
     assert retained == first
+
+
+def test_reports_one_durable_event_per_dataset_downloaded_and_reused(tmp_path) -> None:
+    body = _archive()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=httpx.ByteStream(body))
+
+    raw_dir, manifest_path = _paths(tmp_path)
+    stream = StringIO()
+    configure_logging("INFO", "json", stream=stream)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        downloader = Downloader(client, clock=lambda: NOW)
+        downloader.download_all([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+        stream.truncate(0)
+        stream.seek(0)
+        downloader.download_all([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+
+    events = [json.loads(line)["record"] for line in stream.getvalue().splitlines()]
+    acquired = [event for event in events if event["extra"]["event_code"] == "dataset_acquired"]
+    assert len(acquired) == 1
+    assert acquired[0]["extra"]["dataset"] == SPEC.table_name
+    assert acquired[0]["extra"]["file_name"] == SPEC.file_name
+    assert acquired[0]["extra"]["reused"] is True
+    assert acquired[0]["extra"]["bytes"] == len(body)
 
 
 def test_loading_legacy_manifest_backfills_row_count(tmp_path) -> None:

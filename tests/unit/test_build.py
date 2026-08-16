@@ -1,3 +1,5 @@
+import json
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +17,7 @@ from imdb_ducklake.exceptions import (
 from imdb_ducklake.ingestion.pipeline import IngestionResult
 from imdb_ducklake.ingestion.progress import StructuredLogCollector
 from imdb_ducklake.lakehouse.validation import ValidationResult
+from imdb_ducklake.observability import configure_logging, start_run_context
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult
 
 
@@ -100,6 +103,36 @@ def test_build_runs_all_gates_and_promotes_only_after_validation(tmp_path, monke
     assert (result.promoted.previous_dir / "marker.txt").read_text(encoding="utf-8") == "old"
     assert downloader.calls[0][1]["force"] is True
     assert not list((settings.lakehouse_dir / "builds").glob("*"))
+
+
+def test_build_id_correlates_every_stage_including_acquisition(tmp_path, monkeypatch) -> None:
+    settings = _settings(tmp_path)
+    downloader = FakeDownloader()
+    _install_successful_stages(monkeypatch)
+    stream = StringIO()
+    configure_logging("INFO", "json", stream=stream)
+    start_run_context("run-full-build")
+
+    result = build_lakehouse(
+        settings=settings,
+        downloader=downloader,
+        dbt_executable="dbt",
+        python_executable="python",
+        environment={},
+        reserve_bytes=0,
+    )
+
+    events = [json.loads(line)["record"] for line in stream.getvalue().splitlines()]
+    assert events
+    stage_events = [event for event in events if "stage" in event["extra"]]
+    assert stage_events
+    for event in stage_events:
+        assert event["extra"]["build_id"] == result.build_id
+        assert event["extra"]["run_id"] == "run-full-build"
+    event_codes = {event["extra"]["event_code"] for event in stage_events}
+    assert "build_lock_waiting" in event_codes
+    assert "acquisition_started" in event_codes
+    assert "free_space_gate_passed" in event_codes
 
 
 @pytest.mark.parametrize("stage", ["acquisition", "ingestion", "dbt", "validation", "promotion"])

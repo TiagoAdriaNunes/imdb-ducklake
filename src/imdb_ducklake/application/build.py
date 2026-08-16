@@ -6,9 +6,13 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dlt.common.runtime.collector_base import Collector
 from loguru import logger
+
+if TYPE_CHECKING:
+    from loguru import Logger
 
 from imdb_ducklake.acquisition.downloader import Downloader, VerifiedArtifact
 from imdb_ducklake.config import Settings
@@ -70,8 +74,10 @@ def build_lakehouse(
         raise ValueError("temporary_size_factor must be at least one")
 
     started = time.monotonic()
+    paths = BuildPaths.create(settings.lakehouse_dir)
+    build_logger = logger.bind(build_id=paths.build_id)
     lock_path = settings.lakehouse_dir / ".build.lock"
-    logger.info(
+    build_logger.info(
         "Waiting for build lock",
         event_code="build_lock_waiting",
         stage="lifecycle",
@@ -79,7 +85,7 @@ def build_lakehouse(
         path=str(lock_path),
     )
     with BuildLock(lock_path):
-        logger.info(
+        build_logger.info(
             "Build lock acquired",
             event_code="build_lock_acquired",
             stage="lifecycle",
@@ -91,9 +97,10 @@ def build_lakehouse(
             raw_bytes=_directory_size(settings.raw_dir),
             reserve_bytes=reserve_bytes,
             temporary_size_factor=temporary_size_factor,
+            log=build_logger,
         )
 
-        logger.info(
+        build_logger.info(
             "Acquisition started",
             event_code="acquisition_started",
             stage="acquisition",
@@ -107,7 +114,7 @@ def build_lakehouse(
             force=force_download,
         )
         raw_bytes = sum(artifact.manifest_entry.size_bytes for artifact in artifacts)
-        logger.info(
+        build_logger.info(
             "Acquisition completed",
             event_code="acquisition_completed",
             stage="acquisition",
@@ -121,10 +128,11 @@ def build_lakehouse(
             raw_bytes=raw_bytes,
             reserve_bytes=reserve_bytes,
             temporary_size_factor=temporary_size_factor,
+            log=build_logger,
         )
         removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
         if removed:
-            logger.info(
+            build_logger.info(
                 "Obsolete builds pruned",
                 event_code="obsolete_builds_pruned",
                 stage="lifecycle",
@@ -132,8 +140,6 @@ def build_lakehouse(
                 count=len(removed),
             )
 
-        paths = BuildPaths.create(settings.lakehouse_dir)
-        build_logger = logger.bind(build_id=paths.build_id)
         with temporary_build(paths):
             build_logger.info(
                 "Ingestion started",
@@ -224,10 +230,9 @@ def build_lakehouse(
                 status="completed",
             )
 
-    logger.info(
+    build_logger.info(
         "Lakehouse build completed",
         event_code="lakehouse_build_completed",
-        build_id=promoted.build_id,
         stage="build",
         status="completed",
         elapsed_seconds=round(time.monotonic() - started, 2),
@@ -242,6 +247,7 @@ def _check_space(
     raw_bytes: int,
     reserve_bytes: int,
     temporary_size_factor: int,
+    log: Logger,
 ) -> None:
     current_bytes = _directory_size(settings.current_dir)
     estimated_temporary_bytes = max(raw_bytes * temporary_size_factor, current_bytes)
@@ -252,7 +258,7 @@ def _check_space(
         reserve_bytes=reserve_bytes,
     )
     free_bytes = ensure_free_space(settings.data_dir, budget)
-    logger.info(
+    log.info(
         "Free-space check passed",
         event_code="free_space_gate_passed",
         stage="lifecycle",

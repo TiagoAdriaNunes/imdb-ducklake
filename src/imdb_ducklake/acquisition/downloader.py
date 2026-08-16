@@ -13,6 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+from loguru import logger
 
 from imdb_ducklake.acquisition.manifest import (
     ManifestEntry,
@@ -115,6 +116,16 @@ class Downloader:
                         manifest = manifest.upsert(reusable_entry)
                         write_manifest(manifest_path, manifest)
                     artifacts.append(VerifiedArtifact(dataset, target, reusable_entry))
+                    logger.info(
+                        "Dataset acquired",
+                        event_code="dataset_acquired",
+                        stage="acquisition",
+                        status="completed",
+                        dataset=dataset.table_name,
+                        file_name=dataset.file_name,
+                        bytes=reusable_entry.size_bytes,
+                        reused=True,
+                    )
                     continue
 
             entry = self._download_with_retries(
@@ -125,6 +136,16 @@ class Downloader:
             manifest = manifest.upsert(entry)
             write_manifest(manifest_path, manifest)
             artifacts.append(VerifiedArtifact(dataset, target, entry))
+            logger.info(
+                "Dataset acquired",
+                event_code="dataset_acquired",
+                stage="acquisition",
+                status="completed",
+                dataset=dataset.table_name,
+                file_name=dataset.file_name,
+                bytes=entry.size_bytes,
+                reused=False,
+            )
 
         return tuple(artifacts)
 
