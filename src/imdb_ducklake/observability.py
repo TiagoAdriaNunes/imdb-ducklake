@@ -15,7 +15,17 @@ from rich.text import Text
 if TYPE_CHECKING:
     from loguru import Record
 
-_HIDDEN_CONSOLE_FIELDS = frozenset({"event_code", "logger_name", "stage", "status"})
+_HIDDEN_CONSOLE_FIELDS = frozenset(
+    {
+        "dbt_message",
+        "dbt_stream",
+        "event_code",
+        "logger_name",
+        "mart_row_counts",
+        "stage",
+        "status",
+    }
+)
 _STANDARD_RECORD_FIELDS = frozenset({*logging.makeLogRecord({}).__dict__, "asctime", "message"})
 _console = Console(stderr=True)
 _active_log_format = "console"
@@ -29,6 +39,17 @@ def _format_bytes(value: int) -> str:
             return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
         size /= 1024
     raise AssertionError("unreachable")
+
+
+def _format_duration(value: int | float) -> str:
+    total_seconds = max(0, round(value))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"
 
 
 def _format_console_value(value: Any) -> str:
@@ -50,6 +71,13 @@ def _console_format(record: Record) -> str:
             continue
         if key.endswith("_bytes") and isinstance(value, int):
             fields.append(f"{key.removesuffix('_bytes')}={_format_bytes(value)}")
+            continue
+        if (
+            key.endswith("_seconds")
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
+            fields.append(f"{key.removesuffix('_seconds')}={_format_duration(value)}")
             continue
         fields.append(f"{key}={_format_console_value(value)}")
 

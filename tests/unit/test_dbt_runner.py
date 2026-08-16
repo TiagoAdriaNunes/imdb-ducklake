@@ -1,11 +1,13 @@
 import os
 import subprocess
 import sys
+from io import StringIO
 
 import pytest
 
 from imdb_ducklake.exceptions import TransformationError
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
+from imdb_ducklake.observability import configure_logging, start_run_context
 from imdb_ducklake.transformation.dbt_runner import run_dbt
 
 
@@ -104,3 +106,30 @@ def test_streams_dbt_stdout_and_stderr_while_retaining_output(tmp_path) -> None:
     assert result.stderr == "model warning\n"
     assert ("stdout", "model started") in events
     assert ("stderr", "model warning") in events
+
+
+def test_default_output_handler_removes_dbt_noise_from_console(tmp_path) -> None:
+    paths, project = _inputs(tmp_path)
+    stream = StringIO()
+    configure_logging("INFO", "console", stream=stream)
+    start_run_context("run-dbt-console")
+
+    run_dbt(
+        (
+            "-c",
+            "print('05:12:41  ', flush=True); "
+            "print('05:12:42  1 of 1 PASS model [PASS in 0.01s]', flush=True)",
+        ),
+        build_paths=paths,
+        project_dir=project,
+        profiles_dir=project,
+        controller_path=tmp_path / "controller.duckdb",
+        executable=sys.executable,
+        environment=os.environ,
+    )
+
+    output = stream.getvalue()
+    assert "dbt | 1 of 1 PASS model [PASS in 0.01s]" in output
+    assert "dbt |  |" not in output
+    assert "dbt_stream=" not in output
+    assert "dbt_message=" not in output
