@@ -9,7 +9,7 @@ endif
 GH_PAGES_DIR := ../imdb-ducklake-gh-pages
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
-	publish-docs package ci download ingest transform build validate promote checkpoint
+	publish-docs package ci download ingest transform build validate promote checkpoint shell
 
 help:
 	@echo "Setup"
@@ -24,7 +24,8 @@ help:
 	@echo "  make dbt-parse       dbt parse --project-dir dbt --profiles-dir dbt"
 	@echo "  make coverage        pytest -m 'not smoke' --cov=imdb_ducklake --cov-fail-under=85"
 	@echo "  make package         uv build"
-	@echo "  make ci              format-check + lint + typecheck + dbt-parse + coverage + package"
+	@echo "  make ci              format-check + lint + sql-lint + typecheck + dbt-parse + coverage"
+	@echo "                       + package"
 	@echo ""
 	@echo "Tests"
 	@echo "  make test            uv run pytest (all markers, no coverage gate)"
@@ -42,6 +43,7 @@ help:
 	@echo "  make validate        validate the current or sole staged build"
 	@echo "  make promote         promote a staged build (add ARGS=--build-id=... as needed)"
 	@echo "  make checkpoint      compact and expire snapshots on the current build"
+	@echo "  make shell           interactive SQL shell read-only attached to the current build"
 
 sync:
 	uv sync --locked
@@ -89,7 +91,10 @@ coverage:
 package:
 	uv build
 
-ci: format-check lint typecheck dbt-parse coverage package
+ci: format-check lint sql-lint typecheck dbt-parse coverage package
+
+shell:
+	uv run python scripts/duckdb_shell.py
 
 download:
 	uv run imdb-lakehouse download $(ARGS)
