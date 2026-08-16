@@ -19,6 +19,28 @@ from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import ImdbLakehouseError
 
 _ATTACH_ALIAS = "imdb_lake"
+# `winget install <id>` always lands packages under this fixed, non-machine-specific suffix
+# (the Microsoft Store publisher ID for winget-manifest installs), and appends it to the User
+# PATH registry value - but an already-running terminal keeps the environment it started with,
+# so `shutil.which` alone can miss a `winget install DuckDB.cli` done in a different, newer
+# session. Check the standard location as a fallback before giving up.
+_WINGET_DUCKDB_PATH = (
+    Path(os.environ.get("LOCALAPPDATA", ""))
+    / "Microsoft"
+    / "WinGet"
+    / "Packages"
+    / "DuckDB.cli_Microsoft.Winget.Source_8wekyb3d8bbwe"
+    / "duckdb.exe"
+)
+
+
+def _find_duckdb() -> str | None:
+    found = shutil.which("duckdb")
+    if found:
+        return found
+    if _WINGET_DUCKDB_PATH.is_file():
+        return str(_WINGET_DUCKDB_PATH)
+    return None
 
 
 def _attach_sql(catalog_path: Path, storage_dir: Path) -> str:
@@ -81,7 +103,7 @@ def main() -> None:
         raise SystemExit(f"No promoted build found at {catalog_path}")
 
     attach_sql = _attach_sql(catalog_path, storage_dir)
-    executable = shutil.which("duckdb")
+    executable = _find_duckdb()
     if executable:
         _run_real_cli(executable, attach_sql)
     else:
