@@ -7,6 +7,6 @@ select
     cast(nullif("startYear", '\N') as smallint) as start_year,
     cast(nullif("endYear", '\N') as smallint) as end_year,
     cast(nullif("runtimeMinutes", '\N') as integer) as runtime_minutes,
-    string_split(nullif("genres", '\N'), ',')::varchar[] as genres,
-    cast("_dlt_load_id" as varchar) as dlt_load_id
+    cast("_dlt_load_id" as varchar) as dlt_load_id,
+    cast(string_split(nullif("genres", '\N'), ',') as varchar[]) as genres
 from {{ source('imdb_raw', 'title_basics') }}

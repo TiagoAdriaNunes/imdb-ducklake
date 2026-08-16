@@ -4,6 +4,6 @@ select
     cast("nconst" as varchar) as nconst,
     cast(nullif("category", '\N') as varchar) as category,
     cast(nullif("job", '\N') as varchar) as job,
-    from_json(nullif("characters", '\N'), '["VARCHAR"]') as characters,
-    cast("_dlt_load_id" as varchar) as dlt_load_id
+    cast("_dlt_load_id" as varchar) as dlt_load_id,
+    from_json(nullif("characters", '\N'), '["VARCHAR"]') as characters
 from {{ source('imdb_raw', 'title_principals') }}

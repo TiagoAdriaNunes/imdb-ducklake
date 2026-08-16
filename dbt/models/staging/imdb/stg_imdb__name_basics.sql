@@ -3,7 +3,7 @@ select
     cast(nullif("primaryName", '\N') as varchar) as primary_name,
     cast(nullif("birthYear", '\N') as smallint) as birth_year,
     cast(nullif("deathYear", '\N') as smallint) as death_year,
-    string_split(nullif("primaryProfession", '\N'), ',')::varchar[] as primary_professions,
-    string_split(nullif("knownForTitles", '\N'), ',')::varchar[] as known_for_titles,
-    cast("_dlt_load_id" as varchar) as dlt_load_id
+    cast("_dlt_load_id" as varchar) as dlt_load_id,
+    cast(string_split(nullif("primaryProfession", '\N'), ',') as varchar[]) as primary_professions,
+    cast(string_split(nullif("knownForTitles", '\N'), ',') as varchar[]) as known_for_titles
 from {{ source('imdb_raw', 'name_basics') }}
