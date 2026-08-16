@@ -54,7 +54,8 @@ Python.
   crew, and alternate titles.
 - Marts materialize the query shapes intended for the future Shiny application.
 
-![dbt model lineage from raw sources through marts](dbt-lineage.svg)
+The full interactive lineage graph, generated fresh from the current models, is published at
+[tiagoadrianunes.github.io/imdb-ducklake](https://tiagoadrianunes.github.io/imdb-ducklake/).
 
 ## Failure and concurrency model
 
