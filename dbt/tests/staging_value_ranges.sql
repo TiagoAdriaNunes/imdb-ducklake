@@ -11,7 +11,7 @@ union all
 
 select
     tconst,
-    'rating or votes'
+    'rating or votes' as invalid_field
 from {{ ref('stg_imdb__title_ratings') }}
 where
     average_rating not between 0 and 10
@@ -21,7 +21,7 @@ union all
 
 select
     nconst,
-    'person year'
+    'person year' as invalid_field
 from {{ ref('stg_imdb__name_basics') }}
 where
     birth_year not between 1 and 2200

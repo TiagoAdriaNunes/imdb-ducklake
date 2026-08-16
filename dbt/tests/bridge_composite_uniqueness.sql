@@ -10,8 +10,8 @@ union all
 
 select
     tconst,
-    ordering::varchar,
-    'title_credits'
+    ordering::varchar as grain_value,
+    'title_credits' as relation_name
 from {{ ref('bridge_title_credits') }}
 group by tconst, ordering
 having count(*) > 1
@@ -20,8 +20,8 @@ union all
 
 select
     tconst,
-    genre,
-    'title_genres'
+    genre as grain_value,
+    'title_genres' as relation_name
 from {{ ref('bridge_title_genres') }}
 group by tconst, genre
 having count(*) > 1
@@ -30,8 +30,8 @@ union all
 
 select
     tconst,
-    crew_role || ':' || nconst,
-    'title_crew'
+    crew_role || ':' || nconst as grain_value,
+    'title_crew' as relation_name
 from {{ ref('bridge_title_crew') }}
 group by tconst, crew_role, nconst
 having count(*) > 1
