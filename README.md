@@ -58,6 +58,10 @@ uv run pytest
 Ordinary CI excludes tests marked `smoke`, because those tests require the complete local IMDb
 download. Run them deliberately with `uv run pytest -m smoke` after acquiring all seven archives.
 
+`uv sync` may print a Windows-only warning that it could not create hardlinks and copied files
+instead; this is an unrelated Windows/antivirus filesystem limitation, not a project issue. Set
+`$env:UV_LINK_MODE = "copy"` (PowerShell) to silence it.
+
 ## Logging and run correlation
 
 Interactive commands emit concise console events by default. Use the global option before the
@@ -79,6 +83,18 @@ Every command receives a `run_id`. A staged DuckLake artifact receives a `build_
 internal load package is reported explicitly as `dlt_load_id`. This hierarchy keeps acquisition,
 build lifecycle, and dlt progress events correlated without presenting timestamp-like identifiers
 as elapsed time.
+
+A representative console event:
+
+```console
+14:32:07 | INFO | Free-space check passed | required=1.2GiB | available=57.5GiB | run=1f2e3a4b | build=20260816T143206Z-ab12cd
+```
+
+The same event in `--log-format json` mode, one self-contained JSON object per line:
+
+```json
+{"record": {"time": {"repr": "2026-08-16T14:32:07"}, "level": {"name": "INFO"}, "message": "Free-space check passed", "extra": {"event_code": "free_space_gate_passed", "stage": "lifecycle", "status": "completed", "run_id": "1f2e3a4b-...", "build_id": "20260816T143206Z-ab12cd", "required_bytes": 1288490188, "available_bytes": 61782441984}}}
+```
 
 ## Download IMDb datasets
 
