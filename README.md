@@ -58,6 +58,28 @@ uv run pytest
 Ordinary CI excludes tests marked `smoke`, because those tests require the complete local IMDb
 download. Run them deliberately with `uv run pytest -m smoke` after acquiring all seven archives.
 
+## Logging and run correlation
+
+Interactive commands emit concise console events by default. Use the global option before the
+command name to emit newline-delimited JSON for CI, schedulers, or log processors:
+
+```console
+uv run imdb-lakehouse --log-format json build
+```
+
+`IMDB_LAKEHOUSE_LOG_FORMAT=console|json` provides the equivalent environment configuration, and
+`IMDB_LAKEHOUSE_LOG_LEVEL` controls verbosity. Progress is reported every 10 seconds by default;
+set `IMDB_LAKEHOUSE_PROGRESS_INTERVAL_SECONDS` to a positive number to change the interval.
+
+Interactive terminals render live ingestion counters with Rich. Known totals include a percentage
+and ETA; unknown row totals show the processed count, rate, and elapsed time. JSON and redirected
+output use throttled structured progress events instead of terminal animation.
+
+Every command receives a `run_id`. A staged DuckLake artifact receives a `build_id`, and dlt's
+internal load package is reported explicitly as `dlt_load_id`. This hierarchy keeps acquisition,
+build lifecycle, and dlt progress events correlated without presenting timestamp-like identifiers
+as elapsed time.
+
 ## Download IMDb datasets
 
 Install the locked dependencies and download all seven IMDb source archives:
@@ -133,6 +155,13 @@ Promote an already transformed staged build without repeating acquisition, inges
 uv run imdb-lakehouse promote --build-id 20260815T123000Z-abc123
 ```
 
+After a successful promotion and current-catalog validation, optionally remove other staged builds
+and older retired versions while retaining the newest rollback build:
+
+```console
+uv run imdb-lakehouse promote --build-id 20260815T123000Z-abc123 --prune
+```
+
 The command holds the single-writer lock, validates the staged catalog through a fresh read-only
 process, atomically moves it to `data/ducklake/current/`, and then reattaches and validates the
 promoted catalog from another fresh process. Omit `--build-id` when exactly one staged build exists.
@@ -167,8 +196,9 @@ uv run imdb-lakehouse ingest
 The command revalidates every archive against the manifest before loading it. It prints the build
 ID and catalog path, and leaves the result under `data/ducklake/builds/` for inspection. This
 stage-only command does not replace `data/ducklake/current/`; use `promote` after transformation or
-use the full `build` command for one end-to-end operation. During the load it logs each queued dataset and
-dlt's extraction, normalization, and destination progress every few seconds.
+use the full `build` command for one end-to-end operation. During the load it logs each queued
+dataset and emits throttled extraction, normalization, and destination progress with explicit
+schema and dlt load-package identifiers.
 
 Use the same data-directory override as the download command when the archives are elsewhere:
 

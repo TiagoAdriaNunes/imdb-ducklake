@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+from dlt.common.runtime.collector_base import Collector
+from loguru import logger
 
 from imdb_ducklake.acquisition.downloader import Downloader, VerifiedArtifact
 from imdb_ducklake.config import Settings
 from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import LifecycleError
 from imdb_ducklake.ingestion.pipeline import IngestionResult, ingest_snapshot
+from imdb_ducklake.ingestion.progress import StructuredLogCollector
 from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
@@ -26,8 +29,6 @@ from imdb_ducklake.lakehouse.lifecycle import (
 )
 from imdb_ducklake.lakehouse.validation import ValidationResult, validate_build
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult, run_dbt
-
-logger = logging.getLogger(__name__)
 
 _DEFAULT_RESERVE_BYTES = 1024**3
 _DEFAULT_TEMPORARY_SIZE_FACTOR = 4
@@ -57,6 +58,7 @@ def build_lakehouse(
     environment: Mapping[str, str],
     force_download: bool = False,
     show_progress: bool = True,
+    progress_factory: Callable[[str], Collector] | None = None,
     reserve_bytes: int = _DEFAULT_RESERVE_BYTES,
     temporary_size_factor: int = _DEFAULT_TEMPORARY_SIZE_FACTOR,
 ) -> BuildResult:
@@ -68,9 +70,20 @@ def build_lakehouse(
 
     started = time.monotonic()
     lock_path = settings.lakehouse_dir / ".build.lock"
-    logger.info("Waiting for lakehouse build lock: path=%s", lock_path)
+    logger.info(
+        "Waiting for build lock",
+        event_code="build_lock_waiting",
+        stage="lifecycle",
+        status="waiting",
+        path=str(lock_path),
+    )
     with BuildLock(lock_path):
-        logger.info("Acquired lakehouse build lock")
+        logger.info(
+            "Build lock acquired",
+            event_code="build_lock_acquired",
+            stage="lifecycle",
+            status="completed",
+        )
         recover_interrupted_promotion(settings.lakehouse_dir)
         _check_space(
             settings,
@@ -79,7 +92,13 @@ def build_lakehouse(
             temporary_size_factor=temporary_size_factor,
         )
 
-        logger.info("Starting acquisition: force=%s", force_download)
+        logger.info(
+            "Acquisition started",
+            event_code="acquisition_started",
+            stage="acquisition",
+            status="started",
+            force=force_download,
+        )
         artifacts = downloader.download_all(
             DATASETS,
             raw_dir=settings.raw_dir,
@@ -87,7 +106,14 @@ def build_lakehouse(
             force=force_download,
         )
         raw_bytes = sum(artifact.manifest_entry.size_bytes for artifact in artifacts)
-        logger.info("Completed acquisition: files=%d bytes=%d", len(artifacts), raw_bytes)
+        logger.info(
+            "Acquisition completed",
+            event_code="acquisition_completed",
+            stage="acquisition",
+            status="completed",
+            files=len(artifacts),
+            bytes=raw_bytes,
+        )
 
         _check_space(
             settings,
@@ -97,19 +123,45 @@ def build_lakehouse(
         )
         removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
         if removed:
-            logger.info("Pruned obsolete lakehouse directories: count=%d", len(removed))
+            logger.info(
+                "Obsolete builds pruned",
+                event_code="obsolete_builds_pruned",
+                stage="lifecycle",
+                status="completed",
+                count=len(removed),
+            )
 
         paths = BuildPaths.create(settings.lakehouse_dir)
+        build_logger = logger.bind(build_id=paths.build_id)
         with temporary_build(paths):
-            logger.info("Starting ingestion: build=%s", paths.build_id)
+            build_logger.info(
+                "Ingestion started",
+                event_code="ingestion_started",
+                stage="ingestion",
+                status="started",
+            )
             ingestion = ingest_snapshot(
                 artifacts,
                 build_paths=paths,
                 pipelines_dir=settings.dlt_pipelines_dir,
-                show_progress=show_progress,
+                progress=(
+                    progress_factory(paths.build_id)
+                    if show_progress and progress_factory is not None
+                    else StructuredLogCollector(
+                        build_id=paths.build_id,
+                        log_period=settings.progress_interval_seconds,
+                    )
+                    if show_progress
+                    else None
+                ),
             )
 
-            logger.info("Starting dbt build: build=%s", paths.build_id)
+            build_logger.info(
+                "dbt build started",
+                event_code="dbt_build_started",
+                stage="dbt",
+                status="started",
+            )
             transformation = run_dbt(
                 ("build",),
                 build_paths=paths,
@@ -119,23 +171,57 @@ def build_lakehouse(
                 executable=dbt_executable,
                 environment=environment,
             )
+            build_logger.info(
+                "dbt build completed",
+                event_code="dbt_build_completed",
+                stage="dbt",
+                status="completed",
+            )
 
-            logger.info("Starting fresh-process validation: build=%s", paths.build_id)
+            build_logger.info(
+                "Validation started",
+                event_code="validation_started",
+                stage="validation",
+                status="started",
+            )
             validation = validate_build(
                 paths,
                 executable=python_executable,
                 environment=environment,
                 working_directory=settings.repository_root,
             )
+            build_logger.info(
+                "Validation completed",
+                event_code="validation_completed",
+                stage="validation",
+                status="completed",
+                relation_count=validation.relation_count,
+                mart_row_counts=validation.mart_row_counts,
+            )
 
-            logger.info("Promoting validated build: build=%s", paths.build_id)
+            build_logger.info(
+                "Promotion started",
+                event_code="promotion_started",
+                stage="promotion",
+                status="started",
+            )
             promoted = promote_build(paths)
+            build_logger.info(
+                "Promotion completed",
+                event_code="promotion_completed",
+                stage="promotion",
+                status="completed",
+                current=str(promoted.current_dir),
+            )
 
     logger.info(
-        "Completed lakehouse build: build=%s elapsed_seconds=%.2f current=%s",
-        promoted.build_id,
-        time.monotonic() - started,
-        promoted.current_dir,
+        "Lakehouse build completed",
+        event_code="lakehouse_build_completed",
+        build_id=promoted.build_id,
+        stage="build",
+        status="completed",
+        elapsed_seconds=round(time.monotonic() - started, 2),
+        current=str(promoted.current_dir),
     )
     return BuildResult(artifacts, ingestion, transformation, validation, promoted)
 
@@ -157,9 +243,12 @@ def _check_space(
     )
     free_bytes = ensure_free_space(settings.data_dir, budget)
     logger.info(
-        "Free-space gate passed: required_bytes=%d available_bytes=%d",
-        budget.required_bytes,
-        free_bytes,
+        "Free-space check passed",
+        event_code="free_space_gate_passed",
+        stage="lifecycle",
+        status="completed",
+        required_bytes=budget.required_bytes,
+        available_bytes=free_bytes,
     )
 
 

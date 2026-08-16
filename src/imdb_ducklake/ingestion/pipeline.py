@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 import time
 from dataclasses import dataclass
@@ -10,18 +9,18 @@ from pathlib import Path
 from typing import Any
 
 import dlt
-from dlt.common.runtime.collector import LogCollector
+from dlt.common.runtime.collector_base import Collector
 from dlt.common.schema import Schema
 from dlt.destinations import ducklake
 from dlt.destinations.impl.ducklake.configuration import DuckLakeCredentials
+from loguru import logger
 
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
 from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import IngestionError
+from imdb_ducklake.ingestion.progress import RichProgressCollector
 from imdb_ducklake.ingestion.resources import build_ingestion_resources
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +40,7 @@ def ingest_snapshot(
     build_paths: BuildPaths,
     pipelines_dir: Path,
     chunk_size: int = 5_000,
-    show_progress: bool = False,
+    progress: Collector | None = None,
 ) -> IngestionResult:
     """Replace the raw schema with one complete seven-file IMDb snapshot."""
     _validate_complete_snapshot(artifacts)
@@ -62,27 +61,35 @@ def ingest_snapshot(
     schema = Schema("raw", normalizers={"names": "direct"})
     resources = build_ingestion_resources(artifacts, chunk_size=chunk_size)
     total_bytes = sum(artifact.manifest_entry.size_bytes for artifact in artifacts)
-    logger.info(
-        "Starting dlt ingestion: build=%s files=%d compressed_bytes=%d catalog=%s",
-        build_paths.build_id,
-        len(artifacts),
-        total_bytes,
-        build_paths.catalog_path,
+    ingestion_logger = logger.bind(build_id=build_paths.build_id, stage="ingestion")
+    ingestion_logger.info(
+        "DLT ingestion started",
+        event_code="dlt_ingestion_started",
+        status="started",
+        files=len(artifacts),
+        compressed_bytes=total_bytes,
+        catalog=str(build_paths.catalog_path),
     )
     for artifact in artifacts:
-        logger.info(
-            "Queued dlt resource: table=%s file=%s compressed_bytes=%d",
-            artifact.dataset.table_name,
-            artifact.path.name,
-            artifact.manifest_entry.size_bytes,
+        ingestion_logger.info(
+            "DLT resource queued",
+            event_code="dlt_resource_queued",
+            status="queued",
+            dataset=artifact.dataset.table_name,
+            file_name=artifact.path.name,
+            compressed_bytes=artifact.manifest_entry.size_bytes,
         )
     pipeline_options: dict[str, Any] = {}
-    if show_progress:
-        pipeline_options["progress"] = LogCollector(
-            log_period=2.0,
-            logger=logging.getLogger("imdb_ducklake.dlt"),
-            dump_system_stats=False,
-        )
+    if progress is not None:
+        if isinstance(progress, RichProgressCollector):
+            progress.set_expected_totals(
+                {
+                    artifact.dataset.table_name: artifact.manifest_entry.row_count
+                    for artifact in artifacts
+                    if artifact.manifest_entry.row_count is not None
+                }
+            )
+        pipeline_options["progress"] = progress
     started = time.monotonic()
 
     try:
@@ -115,11 +122,13 @@ def ingest_snapshot(
             f"dlt could not load IMDb snapshot into {build_paths.catalog_path}: {detail}"
         ) from error
 
-    logger.info(
-        "Completed dlt ingestion: build=%s loads=%d elapsed_seconds=%.2f",
-        build_paths.build_id,
-        len(load_info.loads_ids),
-        time.monotonic() - started,
+    ingestion_logger.info(
+        "DLT ingestion completed",
+        event_code="dlt_ingestion_completed",
+        status="completed",
+        loads=len(load_info.loads_ids),
+        dlt_load_ids=list(load_info.loads_ids),
+        elapsed_seconds=round(time.monotonic() - started, 2),
     )
 
     return IngestionResult(

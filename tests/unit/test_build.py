@@ -13,6 +13,7 @@ from imdb_ducklake.exceptions import (
     ValidationError,
 )
 from imdb_ducklake.ingestion.pipeline import IngestionResult
+from imdb_ducklake.ingestion.progress import StructuredLogCollector
 from imdb_ducklake.lakehouse.validation import ValidationResult
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult
 
@@ -41,7 +42,15 @@ def _settings(tmp_path) -> Settings:
 
 
 def _install_successful_stages(monkeypatch) -> None:
-    def ingest(artifacts, *, build_paths, pipelines_dir, show_progress):
+    def ingest(
+        artifacts,
+        *,
+        build_paths,
+        pipelines_dir,
+        progress,
+    ):
+        assert isinstance(progress, StructuredLogCollector)
+        assert progress.log_period == 10.0
         build_paths.catalog_path.write_text("catalog", encoding="utf-8")
         (build_paths.storage_dir / "rows.parquet").write_text("rows", encoding="utf-8")
         return IngestionResult(

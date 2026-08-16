@@ -98,6 +98,7 @@ def _manifest_resource(artifacts: tuple[VerifiedArtifact, ...]) -> DltResource:
             {"name": "table_name", "data_type": "text", "nullable": False},
             {"name": "url", "data_type": "text", "nullable": False},
             {"name": "size_bytes", "data_type": "bigint", "nullable": False},
+            {"name": "row_count", "data_type": "bigint", "nullable": True},
             {"name": "sha256", "data_type": "text", "nullable": False},
             {"name": "downloaded_at", "data_type": "text", "nullable": False},
             {"name": "batch_id", "data_type": "text", "nullable": False},

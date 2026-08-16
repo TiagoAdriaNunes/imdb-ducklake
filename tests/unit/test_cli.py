@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
@@ -41,6 +42,53 @@ def test_download_command_reports_verified_archives(tmp_path, monkeypatch) -> No
     assert "Verified 7 archives (861 bytes)." in result.stdout
 
 
+def test_global_log_format_reaches_configuration_and_binds_run_id(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        log_format="json",
+    )
+    received: dict[str, object] = {}
+    run_ids: list[str] = []
+
+    def load(**kwargs):
+        received.update(kwargs)
+        return settings
+
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(load))
+    monkeypatch.setattr(cli, "Downloader", FakeDownloader)
+    monkeypatch.setattr(
+        cli,
+        "start_run_context",
+        lambda run_id: run_ids.append(run_id) or run_id,
+    )
+
+    result = runner.invoke(cli.app, ["--log-format", "json", "download"])
+
+    assert result.exit_code == 0
+    assert received["log_format"] == "json"
+    assert len(run_ids) == 1
+    assert run_ids[0]
+
+
+def test_progress_collector_uses_rich_only_for_interactive_console(tmp_path) -> None:
+    class InteractiveStream(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    cli.configure_logging("INFO", "console", stream=InteractiveStream())
+
+    interactive = cli._progress_collector(settings, "build-rich")
+
+    assert isinstance(interactive, cli.RichProgressCollector)
+
+    cli.configure_logging("INFO", "json", stream=StringIO())
+
+    redirected = cli._progress_collector(settings, "build-structured")
+    assert isinstance(redirected, cli.StructuredLogCollector)
+
+
 def test_download_command_maps_domain_error_to_exit_code(monkeypatch) -> None:
     def fail(**_kwargs):
         raise AcquisitionError("source unavailable")
@@ -78,7 +126,6 @@ def test_build_command_runs_complete_orchestrator_and_reports_promotion(
     assert received is not None
     assert received["settings"] == settings
     assert received["force_download"] is True
-    assert "dbt passed" in result.stdout
     assert "Promoted build complete-build" in result.stdout
     assert "validating 31 relations" in result.stdout
 
@@ -89,11 +136,17 @@ def test_ingest_command_loads_isolated_build_and_reports_catalog(tmp_path, monke
     monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
     monkeypatch.setattr(cli, "load_verified_artifacts", lambda *_args, **_kwargs: artifacts)
 
-    def fake_ingest(received, *, build_paths, pipelines_dir, show_progress):
+    def fake_ingest(
+        received,
+        *,
+        build_paths,
+        pipelines_dir,
+        progress,
+    ):
         assert received == artifacts
         assert build_paths.storage_dir.is_dir()
         assert pipelines_dir == settings.dlt_pipelines_dir
-        assert show_progress is True
+        assert progress is not None
         build_paths.catalog_path.write_text("fixture", encoding="utf-8")
         return SimpleNamespace(load_ids=("load-1",), catalog_path=build_paths.catalog_path)
 
@@ -156,7 +209,6 @@ def test_transform_command_runs_dbt_for_staged_build(tmp_path, monkeypatch) -> N
     result = runner.invoke(cli.app, ["transform", "--build-id", "fixture-build"])
 
     assert result.exit_code == 0
-    assert "dbt completed" in result.stdout
     assert "Transformed and tested build fixture-build; it remains unpromoted." in result.stdout
 
 
@@ -194,17 +246,25 @@ def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, mon
             mart_row_counts={"mart_title_search": 2},
         )
 
+    def fake_prune(received, *, keep_retired):
+        assert received == settings.lakehouse_dir
+        assert keep_retired == 1
+        events.append("prune")
+        return (settings.lakehouse_dir / "builds" / "stale-build",)
+
     monkeypatch.setattr(cli, "validate_build", fake_validate_build)
     monkeypatch.setattr(cli, "promote_build", fake_promote)
     monkeypatch.setattr(cli, "validate_catalog", fake_validate_catalog)
+    monkeypatch.setattr(cli, "prune_obsolete_builds", fake_prune)
 
-    result = runner.invoke(cli.app, ["promote", "--build-id", paths.build_id])
+    result = runner.invoke(cli.app, ["promote", "--build-id", paths.build_id, "--prune"])
 
     assert result.exit_code == 0
-    assert events == ["validate staged", "promote", "validate current"]
+    assert events == ["validate staged", "promote", "validate current", "prune"]
     assert "Promoted build fixture-build" in result.stdout
     assert "reattaching 31 current relations read-only" in result.stdout
     assert "marts.mart_title_search: 2 rows" in result.stdout
+    assert "Pruned 1 obsolete build workspace(s)" in result.stdout
 
 
 def test_validate_command_automatically_selects_the_only_staged_build(
