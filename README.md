@@ -58,6 +58,10 @@ uv run pytest
 Ordinary CI excludes tests marked `smoke`, because those tests require the complete local IMDb
 download. Run them deliberately with `uv run pytest -m smoke` after acquiring all seven archives.
 
+Every command above, every quality gate, and every `imdb-lakehouse` pipeline stage is also
+available as an explicit `make` target; run `make help` for the full list, or `make ci` to run
+every check `.github/workflows/ci.yml` runs, in the same order.
+
 `uv sync` may print a Windows-only warning that it could not create hardlinks and copied files
 instead; this is an unrelated Windows/antivirus filesystem limitation, not a project issue. Set
 `$env:UV_LINK_MODE = "copy"` (PowerShell) to silence it.
