@@ -60,7 +60,7 @@ docs:
 	uv run dbt docs generate --project-dir dbt --profiles-dir dbt
 
 publish-docs: docs
-	@if [ ! -d "$(GH_PAGES_DIR)/.git" ]; then \
+	@if [ ! -e "$(GH_PAGES_DIR)/.git" ]; then \
 		git worktree add "$(GH_PAGES_DIR)" gh-pages; \
 	fi
 	cp dbt/target/index.html dbt/target/manifest.json dbt/target/catalog.json \
