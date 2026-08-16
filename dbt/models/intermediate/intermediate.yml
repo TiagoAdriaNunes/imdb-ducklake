@@ -2,20 +2,30 @@ version: 2
 
 models:
   - name: dim_titles
-    description: One canonical typed row per IMDb title.
+    description: One canonical typed row per IMDb title, grain tconst.
     columns:
       - {name: tconst, description: Title dimension key., data_tests: [not_null, unique]}
+      - {name: title_type, description: IMDb title type, e.g. movie, short, tvSeries, tvEpisode.}
       - {name: primary_title, description: Primary display title.}
+      - {name: original_title, description: Original title text.}
+      - {name: is_adult, description: Adult-content flag.}
+      - {name: start_year, description: Release start year; TV series start year for series.}
+      - {name: end_year, description: TV series end year; null for all other title types.}
+      - {name: runtime_minutes, description: Primary runtime, in minutes.}
       - {name: genres, description: Genre array.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: dim_people
-    description: One canonical typed row per IMDb person.
+    description: One canonical typed row per IMDb person, grain nconst.
     columns:
       - {name: nconst, description: Person dimension key., data_tests: [not_null, unique]}
       - {name: primary_name, description: Primary person name.}
+      - {name: birth_year, description: Birth year.}
+      - {name: death_year, description: Death year, if known.}
+      - {name: primary_professions, description: Top professions array.}
+      - {name: known_for_titles, description: Known-for title identifier array.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: fct_title_ratings
-    description: One rating and vote-measure row per rated title.
+    description: One rating and vote-measure row per rated title, grain tconst.
     columns:
       - name: tconst
         description: Rated title key.
@@ -28,7 +38,7 @@ models:
       - {name: num_votes, description: Vote-count measure.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: fct_episodes
-    description: Episode-to-series relationship fact.
+    description: Episode-to-series relationship fact, grain tconst (one row per episode title).
     columns:
       - name: tconst
         description: Episode title key.
@@ -47,7 +57,7 @@ models:
       - {name: episode_number, description: Episode number.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_genres
-    description: One row per title and genre.
+    description: One row per title and genre, grain (tconst, genre).
     columns:
       - name: tconst
         description: Title key.
@@ -58,7 +68,7 @@ models:
       - {name: genre, description: Normalized genre., data_tests: [not_null]}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_credits
-    description: One row per ordered principal title credit.
+    description: One row per ordered principal title credit, grain (tconst, ordering).
     columns:
       - name: tconst
         description: Title key.
@@ -72,10 +82,11 @@ models:
               arguments: {to: "ref('dim_people')", field: nconst}
       - {name: ordering, description: Credit ordering.}
       - {name: category, description: Credit category.}
+      - {name: job, description: Specific job title, if applicable.}
       - {name: characters, description: Character name array.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_crew
-    description: One row per title, crew role, and person.
+    description: One row per title, crew role, and person, grain (tconst, crew_role, nconst).
     columns:
       - name: tconst
         description: Title key.
@@ -90,7 +101,7 @@ models:
       - {name: crew_role, description: Director or writer role.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_akas
-    description: Typed alternate-title bridge.
+    description: Typed alternate-title bridge, grain (tconst, ordering).
     columns:
       - name: tconst
         description: Title key.
@@ -101,6 +112,9 @@ models:
       - {name: title, description: Alternate title text.}
       - {name: region, description: Optional region code.}
       - {name: language, description: Optional language code.}
+      - {name: types, description: Alternate-title type array.}
+      - {name: attributes, description: Alternate-title attribute array.}
+      - {name: is_original_title, description: Whether this is the original title.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: int_title_genre_lists
     description: One persisted genre array per title, built separately to bound mart memory use.

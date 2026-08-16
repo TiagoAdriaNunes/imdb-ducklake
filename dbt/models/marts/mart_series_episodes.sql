@@ -5,7 +5,7 @@ select
     episode.primary_title as episode_title,
     episodes.season_number,
     episodes.episode_number,
-    episode.start_year,
+    episode.start_year as episode_start_year,
     ratings.average_rating,
     ratings.num_votes,
     episodes.dlt_load_id

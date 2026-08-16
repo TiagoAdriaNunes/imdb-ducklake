@@ -10,3 +10,4 @@ should add a superseding ADR rather than rewriting history.
 - [0005: Use GitHub as the canonical source repository](0005-github-canonical-repository.md)
 - [0006: Use Loguru for structured application logging](0006-loguru-structured-logging.md)
 - [0007: Local single-user reliability policy](0007-local-reliability-policy.md)
+- [0008: Schema compatibility policy](0008-schema-compatibility-policy.md)

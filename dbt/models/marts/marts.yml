@@ -2,44 +2,66 @@ version: 2
 
 models:
   - name: mart_title_search
-    description: One search-ready row per title with ratings, genres, directors, and principal cast.
+    description: One search-ready row per title with ratings, genres, directors, and principal cast, grain tconst.
+    config:
+      contract: {enforced: true}
     columns:
-      - {name: tconst, description: Title key., data_tests: [not_null, unique]}
-      - {name: primary_title, description: Searchable title text.}
-      - {name: average_rating, description: Average rating measure.}
-      - {name: num_votes, description: Vote-count measure.}
-      - {name: genres, description: Genre array.}
-      - {name: directors, description: Director name array.}
-      - {name: principal_cast, description: Principal cast name array.}
-      - {name: dlt_load_id, description: Raw title lineage., data_tests: [not_null]}
+      - {name: tconst, data_type: varchar, description: Title key., data_tests: [not_null, unique]}
+      - {name: title_type, data_type: varchar, description: "IMDb title type, e.g. movie, short, tvSeries, tvEpisode."}
+      - {name: primary_title, data_type: varchar, description: Searchable title text.}
+      - {name: original_title, data_type: varchar, description: Original title text.}
+      - {name: is_adult, data_type: boolean, description: Adult-content flag.}
+      - {name: start_year, data_type: smallint, description: Release start year; TV series start year for series.}
+      - {name: end_year, data_type: smallint, description: TV series end year; null for all other title types.}
+      - {name: runtime_minutes, data_type: integer, description: Primary runtime, in minutes.}
+      - {name: average_rating, data_type: double, description: Average rating measure.}
+      - {name: num_votes, data_type: bigint, description: Vote-count measure.}
+      - {name: genres, data_type: "varchar[]", description: Genre array.}
+      - {name: directors, data_type: "varchar[]", description: Director name array.}
+      - {name: principal_cast, data_type: "varchar[]", description: Principal cast name array.}
+      - {name: dlt_load_id, data_type: varchar, description: Raw title lineage., data_tests: [not_null]}
   - name: mart_genre_year_summary
-    description: Title, rating, and vote summaries by year, title type, and genre.
+    description: Title, rating, and vote summaries by year, title type, and genre, grain (start_year, title_type, genre).
+    config:
+      contract: {enforced: true}
     columns:
-      - {name: start_year, description: Release year grouping.}
-      - {name: title_type, description: IMDb title-type grouping.}
-      - {name: genre, description: Genre grouping., data_tests: [not_null]}
-      - {name: title_count, description: Number of titles., data_tests: [not_null]}
-      - {name: rated_title_count, description: Number of rated titles., data_tests: [not_null]}
-      - {name: average_rating, description: Mean rating of rated titles.}
-      - {name: total_votes, description: Sum of title vote counts., data_tests: [not_null]}
+      - {name: start_year, data_type: smallint, description: Release year grouping.}
+      - {name: title_type, data_type: varchar, description: IMDb title-type grouping.}
+      - {name: genre, data_type: varchar, description: Genre grouping., data_tests: [not_null]}
+      - {name: title_count, data_type: bigint, description: Number of titles., data_tests: [not_null]}
+      - {name: rated_title_count, data_type: bigint, description: Number of rated titles., data_tests: [not_null]}
+      - {name: average_rating, data_type: double, description: Mean rating of rated titles.}
+      - {name: total_votes, data_type: hugeint, description: Sum of title vote counts., data_tests: [not_null]}
   - name: mart_person_filmography
-    description: Searchable ordered people-to-title credits with role and rating details.
+    description: Searchable ordered people-to-title credits with role and rating details, grain (nconst, tconst, ordering).
+    config:
+      contract: {enforced: true}
     columns:
-      - {name: nconst, description: Person key., data_tests: [not_null]}
-      - {name: primary_name, description: Person display name.}
-      - {name: tconst, description: Credited title key., data_tests: [not_null]}
-      - {name: ordering, description: Credit ordering., data_tests: [not_null]}
-      - {name: category, description: Credit category.}
-      - {name: average_rating, description: Optional title rating.}
-      - {name: dlt_load_id, description: Raw credit lineage., data_tests: [not_null]}
+      - {name: nconst, data_type: varchar, description: Person key., data_tests: [not_null]}
+      - {name: primary_name, data_type: varchar, description: Person display name.}
+      - {name: tconst, data_type: varchar, description: Credited title key., data_tests: [not_null]}
+      - {name: primary_title, data_type: varchar, description: Credited title text.}
+      - {name: title_type, data_type: varchar, description: Credited title's IMDb title type.}
+      - {name: start_year, data_type: smallint, description: Credited title's release start year.}
+      - {name: ordering, data_type: integer, description: Credit ordering., data_tests: [not_null]}
+      - {name: category, data_type: varchar, description: Credit category.}
+      - {name: job, data_type: varchar, description: Specific job title, if applicable.}
+      - {name: characters, data_type: "varchar[]", description: Character name array, if applicable.}
+      - {name: average_rating, data_type: double, description: Optional title rating.}
+      - {name: num_votes, data_type: bigint, description: Optional title vote count.}
+      - {name: dlt_load_id, data_type: varchar, description: Raw credit lineage., data_tests: [not_null]}
   - name: mart_series_episodes
-    description: Series, season, and episode navigation with optional rating measures.
+    description: Series, season, and episode navigation with optional rating measures, grain episode_tconst.
+    config:
+      contract: {enforced: true}
     columns:
-      - {name: series_tconst, description: Parent series key., data_tests: [not_null]}
-      - {name: series_title, description: Parent series title.}
-      - {name: episode_tconst, description: Episode title key., data_tests: [not_null, unique]}
-      - {name: episode_title, description: Episode title.}
-      - {name: season_number, description: Season number.}
-      - {name: episode_number, description: Episode number.}
-      - {name: average_rating, description: Optional episode rating.}
-      - {name: dlt_load_id, description: Raw episode lineage., data_tests: [not_null]}
+      - {name: series_tconst, data_type: varchar, description: Parent series key., data_tests: [not_null]}
+      - {name: series_title, data_type: varchar, description: Parent series title.}
+      - {name: episode_tconst, data_type: varchar, description: Episode title key., data_tests: [not_null, unique]}
+      - {name: episode_title, data_type: varchar, description: Episode title.}
+      - {name: season_number, data_type: integer, description: Season number.}
+      - {name: episode_number, data_type: integer, description: Episode number.}
+      - {name: episode_start_year, data_type: smallint, description: Episode title's release start year.}
+      - {name: average_rating, data_type: double, description: Optional episode rating.}
+      - {name: num_votes, data_type: bigint, description: Optional episode vote count.}
+      - {name: dlt_load_id, data_type: varchar, description: Raw episode lineage., data_tests: [not_null]}

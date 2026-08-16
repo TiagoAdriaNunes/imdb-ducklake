@@ -13,6 +13,8 @@ clean-targets: ["target", "dbt_packages"]
 models:
   imdb_ducklake:
     +database: imdb_lake
+    +meta:
+      owner: imdb-ducklake application/build.py pipeline (single local operator, no external write access)
     staging:
       +schema: staging
       +materialized: view
