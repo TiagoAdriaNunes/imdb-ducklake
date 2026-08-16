@@ -190,6 +190,60 @@ def test_retries_transient_server_error(tmp_path) -> None:
     assert delays == [0.5]
 
 
+def test_retry_events_report_attempt_number_and_final_outcome(tmp_path) -> None:
+    body = _archive()
+    requests = 0
+
+    def flaky_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return httpx.Response(
+            503 if requests == 1 else 200,
+            stream=httpx.ByteStream(body),
+        )
+
+    raw_dir, manifest_path = _paths(tmp_path)
+    stream = StringIO()
+    configure_logging("INFO", "json", stream=stream)
+    with httpx.Client(transport=httpx.MockTransport(flaky_handler)) as client:
+        Downloader(client, sleeper=lambda _seconds: None).download_all(
+            [SPEC], raw_dir=raw_dir, manifest_path=manifest_path
+        )
+
+    events = [json.loads(line)["record"] for line in stream.getvalue().splitlines()]
+    retries = [event for event in events if event["extra"].get("event_code") == "acquisition_retry"]
+    assert len(retries) == 1
+    assert retries[0]["extra"]["dataset"] == SPEC.table_name
+    assert retries[0]["extra"]["attempt"] == 1
+    assert retries[0]["extra"]["attempts"] == 3
+    assert body.decode(errors="ignore") not in stream.getvalue()
+
+    def failing_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    stream.truncate(0)
+    stream.seek(0)
+    other_raw_dir, other_manifest_path = _paths(tmp_path / "other")
+    with (
+        httpx.Client(transport=httpx.MockTransport(failing_handler)) as client,
+        pytest.raises(AcquisitionError),
+    ):
+        Downloader(client, attempts=2, sleeper=lambda _seconds: None).download_all(
+            [SPEC], raw_dir=other_raw_dir, manifest_path=other_manifest_path
+        )
+
+    exhausted_events = [json.loads(line)["record"] for line in stream.getvalue().splitlines()]
+    exhausted = [
+        event
+        for event in exhausted_events
+        if event["extra"].get("event_code") == "acquisition_retry_exhausted"
+    ]
+    assert len(exhausted) == 1
+    assert exhausted[0]["extra"]["dataset"] == SPEC.table_name
+    assert exhausted[0]["extra"]["attempts"] == 2
+    assert exhausted[0]["extra"]["status"] == "failed"
+
+
 def test_resumes_interrupted_download_from_saved_byte_offset(tmp_path) -> None:
     body = _archive(row="1\ta value long enough to split")
     split_at = len(body) // 2

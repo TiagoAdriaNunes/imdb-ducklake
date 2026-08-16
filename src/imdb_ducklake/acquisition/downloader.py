@@ -180,7 +180,28 @@ class Downloader:
             except (httpx.TransportError, _RetryableResponseError) as error:
                 last_error = error
                 if attempt < self._attempts:
-                    self._sleeper(0.5 * (2 ** (attempt - 1)))
+                    delay = 0.5 * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Retrying dataset download",
+                        event_code="acquisition_retry",
+                        stage="acquisition",
+                        status="retrying",
+                        dataset=dataset.table_name,
+                        attempt=attempt,
+                        attempts=self._attempts,
+                        delay_seconds=delay,
+                        error_type=type(error).__name__,
+                    )
+                    self._sleeper(delay)
+        logger.error(
+            "Dataset download retries exhausted",
+            event_code="acquisition_retry_exhausted",
+            stage="acquisition",
+            status="failed",
+            dataset=dataset.table_name,
+            attempts=self._attempts,
+            error_type=type(last_error).__name__ if last_error else None,
+        )
         raise AcquisitionError(
             f"Could not download {dataset.file_name} after {self._attempts} attempts"
         ) from last_error
