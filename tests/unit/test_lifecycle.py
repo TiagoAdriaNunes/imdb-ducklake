@@ -11,6 +11,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
     SpaceBudget,
+    checkpoint_lakehouse,
     cleanup_build,
     ensure_free_space,
     initialize_build,
@@ -323,6 +324,44 @@ def test_promotion_rejects_unsafe_retirement_token_before_moving_current(tmp_pat
     assert marker.read_text(encoding="utf-8") == "old"
     assert paths.temporary_dir.exists()
     assert not (root / "retired").exists()
+
+
+def test_checkpoint_lakehouse_compacts_a_real_ducklake_catalog(tmp_path) -> None:
+    duckdb = pytest.importorskip("duckdb")
+    catalog_path = tmp_path / "catalog.duckdb"
+    storage_dir = tmp_path / "storage"
+    storage_dir.mkdir()
+    connection = duckdb.connect(":memory:")
+    try:
+        connection.execute("LOAD ducklake")
+        connection.execute(
+            f"ATTACH 'ducklake:{catalog_path.as_posix()}' AS imdb_lake "
+            f"(DATA_PATH '{storage_dir.as_posix()}')"
+        )
+        connection.execute("CREATE TABLE imdb_lake.demo AS SELECT 1 AS value")
+        connection.execute("INSERT INTO imdb_lake.demo VALUES (2)")
+    finally:
+        connection.close()
+
+    checkpoint_lakehouse(catalog_path, storage_dir)
+
+    verify = duckdb.connect(":memory:")
+    try:
+        verify.execute("LOAD ducklake")
+        verify.execute(
+            f"ATTACH 'ducklake:{catalog_path.as_posix()}' AS imdb_lake "
+            f"(DATA_PATH '{storage_dir.as_posix()}', READ_ONLY)"
+        )
+        rows = verify.execute("SELECT value FROM imdb_lake.demo ORDER BY value").fetchall()
+    finally:
+        verify.close()
+    assert rows == [(1,), (2,)]
+
+
+def test_checkpoint_lakehouse_wraps_failures_as_lifecycle_errors(tmp_path) -> None:
+    pytest.importorskip("duckdb")
+    with pytest.raises(LifecycleError, match="Could not checkpoint"):
+        checkpoint_lakehouse(tmp_path / "missing" / "catalog.duckdb", tmp_path / "missing-storage")
 
 
 def test_incomplete_build_cannot_be_promoted(tmp_path) -> None:

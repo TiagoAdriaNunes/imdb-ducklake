@@ -236,6 +236,11 @@ def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, mon
             storage_dir=settings.current_dir / "storage",
         )
 
+    def fake_checkpoint(catalog_path, storage_dir):
+        assert catalog_path == settings.current_dir / "catalog.duckdb"
+        assert storage_dir == settings.current_dir / "storage"
+        events.append("checkpoint")
+
     def fake_validate_catalog(**kwargs):
         assert kwargs["catalog_path"] == settings.current_dir / "catalog.duckdb"
         assert kwargs["storage_dir"] == settings.current_dir / "storage"
@@ -254,13 +259,14 @@ def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, mon
 
     monkeypatch.setattr(cli, "validate_build", fake_validate_build)
     monkeypatch.setattr(cli, "promote_build", fake_promote)
+    monkeypatch.setattr(cli, "checkpoint_lakehouse", fake_checkpoint)
     monkeypatch.setattr(cli, "validate_catalog", fake_validate_catalog)
     monkeypatch.setattr(cli, "prune_obsolete_builds", fake_prune)
 
     result = runner.invoke(cli.app, ["promote", "--build-id", paths.build_id, "--prune"])
 
     assert result.exit_code == 0
-    assert events == ["validate staged", "promote", "validate current", "prune"]
+    assert events == ["validate staged", "promote", "checkpoint", "validate current", "prune"]
     assert "Promoted build fixture-build" in result.stdout
     assert "reattaching 31 current relations read-only" in result.stdout
     assert "marts.mart_title_search: 2 rows" in result.stdout
@@ -323,6 +329,78 @@ def test_validate_command_prefers_current_without_requiring_arguments(
     assert received["catalog_path"] == catalog_path
     assert received["build_id"] == "current"
     assert "Validated current: 31 required relations." in result.stdout
+
+
+def test_checkpoint_command_uses_current_build_lock_and_structured_logs(
+    tmp_path, monkeypatch
+) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    settings.current_dir.mkdir(parents=True)
+    catalog_path = settings.current_dir / "catalog.duckdb"
+    storage_dir = settings.current_dir / "storage"
+    catalog_path.write_text("fixture", encoding="utf-8")
+    storage_dir.mkdir()
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    received: list[tuple[object, object]] = []
+    events: list[tuple[str, dict[str, object]]] = []
+
+    class FakeLogger:
+        def bind(self, **_kwargs):
+            return self
+
+        def info(self, message, **fields):
+            events.append((message, fields))
+
+        def error(self, message, **fields):
+            events.append((message, fields))
+
+    monkeypatch.setattr(cli, "logger", FakeLogger())
+    monkeypatch.setattr(
+        cli,
+        "checkpoint_lakehouse",
+        lambda catalog, storage: received.append((catalog, storage)),
+    )
+
+    result = runner.invoke(cli.app, ["checkpoint"])
+
+    assert result.exit_code == 0
+    assert received == [(catalog_path, storage_dir)]
+    assert [message for message, _fields in events] == [
+        "Checkpoint started",
+        "Checkpoint completed",
+    ]
+    assert events[0][1]["event_code"] == "checkpoint_started"
+    assert events[1][1]["event_code"] == "checkpoint_completed"
+    assert isinstance(events[1][1]["elapsed_seconds"], float)
+    assert "Checkpointed current lakehouse in" in result.stdout
+
+
+def test_checkpoint_command_logs_missing_current_as_lifecycle_failure(
+    tmp_path, monkeypatch
+) -> None:
+    settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    events: list[tuple[str, dict[str, object]]] = []
+
+    class FakeLogger:
+        def bind(self, **_kwargs):
+            return self
+
+        def info(self, message, **fields):
+            events.append((message, fields))
+
+        def error(self, message, **fields):
+            events.append((message, fields))
+
+    monkeypatch.setattr(cli, "logger", FakeLogger())
+
+    result = runner.invoke(cli.app, ["checkpoint"])
+
+    assert result.exit_code == cli.ExitCode.LIFECYCLE_ERROR
+    assert "Current DuckLake catalog does not exist" in result.stderr
+    assert [message for message, _fields in events] == ["Checkpoint failed"]
+    assert events[0][1]["event_code"] == "checkpoint_failed"
+    assert events[0][1]["error_type"] == "LifecycleError"
 
 
 def test_main_invokes_typer_application(monkeypatch) -> None:
