@@ -1,5 +1,7 @@
-.PHONY: help sync format format-check lint typecheck dbt-parse test smoke coverage docs package ci \
-	download ingest transform build validate promote checkpoint
+GH_PAGES_DIR := ../imdb-ducklake-gh-pages
+
+.PHONY: help sync format format-check lint typecheck dbt-parse test smoke coverage docs \
+	publish-docs package ci download ingest transform build validate promote checkpoint
 
 help:
 	@echo "Setup"
@@ -20,7 +22,8 @@ help:
 	@echo "  make smoke           uv run pytest -m smoke (needs the full local IMDb download)"
 	@echo ""
 	@echo "Docs"
-	@echo "  make docs            dbt docs generate"
+	@echo "  make docs            dbt docs generate (against whatever catalog is configured)"
+	@echo "  make publish-docs    generate + stage docs on the gh-pages branch (review, then push)"
 	@echo ""
 	@echo "Lakehouse pipeline (imdb-lakehouse CLI)"
 	@echo "  make download        download and verify all seven IMDb archives"
@@ -51,6 +54,16 @@ dbt-parse:
 
 docs:
 	uv run dbt docs generate --project-dir dbt --profiles-dir dbt
+
+publish-docs: docs
+	@if [ ! -d "$(GH_PAGES_DIR)/.git" ]; then \
+		git worktree add "$(GH_PAGES_DIR)" gh-pages; \
+	fi
+	cp dbt/target/index.html dbt/target/manifest.json dbt/target/catalog.json \
+		dbt/target/graph_summary.json dbt/target/semantic_manifest.json "$(GH_PAGES_DIR)/"
+	touch "$(GH_PAGES_DIR)/.nojekyll"
+	cd "$(GH_PAGES_DIR)" && git add -A && git commit -m "docs: publish dbt docs site"
+	@echo "Review the commit in $(GH_PAGES_DIR), then: git -C $(GH_PAGES_DIR) push origin gh-pages"
 
 test:
 	uv run pytest

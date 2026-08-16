@@ -9,69 +9,69 @@ sources:
       - name: title_akas
         description: Localized and alternate title names.
         columns:
-          - {name: titleId, description: IMDb title identifier.}
-          - {name: ordering, description: Ordering within the title's alternate names.}
-          - {name: title, description: Localized or alternate title text.}
-          - {name: region, description: Region code as published by IMDb.}
-          - {name: language, description: Language code as published by IMDb.}
-          - {name: types, description: Comma-delimited alternate-title types.}
-          - {name: attributes, description: Comma-delimited alternate-title attributes.}
-          - {name: isOriginalTitle, description: Raw original-title flag.}
+          - {name: titleId, description: "tconst: alphanumeric unique identifier of the title."}
+          - {name: ordering, description: A number that uniquely identifies rows for a given titleId.}
+          - {name: title, description: The localized title.}
+          - {name: region, description: The region for this version of the title.}
+          - {name: language, description: The language of the title.}
+          - {name: types, description: "Comma-delimited enumerated attributes for this alternative title: one or more of alternative, dvd, festival, tv, video, working, original, imdbDisplay. IMDb may add new values without warning."}
+          - {name: attributes, description: "Comma-delimited additional terms describing this alternative title; free-form and not enumerated, unlike `types`."}
+          - {name: isOriginalTitle, description: "Raw flag: 0 = not the original title, 1 = original title."}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: title_basics
         description: Core title attributes.
         columns:
-          - {name: tconst, description: IMDb title identifier.}
-          - {name: titleType, description: IMDb title type.}
-          - {name: primaryTitle, description: Primary display title.}
-          - {name: originalTitle, description: Original title text.}
-          - {name: isAdult, description: Raw adult-content flag.}
-          - {name: startYear, description: Raw release start year.}
-          - {name: endYear, description: Raw release end year.}
-          - {name: runtimeMinutes, description: Raw runtime in minutes.}
-          - {name: genres, description: Comma-delimited genres.}
+          - {name: tconst, description: Alphanumeric unique identifier of the title.}
+          - {name: titleType, description: "The type/format of the title, e.g. movie, short, tvSeries, tvEpisode, video."}
+          - {name: primaryTitle, description: "The more popular title, or the title used by the filmmakers on promotional materials at the point of release."}
+          - {name: originalTitle, description: Original title, in the original language.}
+          - {name: isAdult, description: "Raw flag: 0 = non-adult title, 1 = adult title."}
+          - {name: startYear, description: "Release year (YYYY); for TV series, the series start year."}
+          - {name: endYear, description: "TV series end year (YYYY); '\\N' for all other title types."}
+          - {name: runtimeMinutes, description: Primary runtime of the title, in minutes.}
+          - {name: genres, description: Comma-delimited list of up to three genres associated with the title.}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: title_crew
         description: Director and writer identifiers by title.
         columns:
           - {name: tconst, description: IMDb title identifier.}
-          - {name: directors, description: Comma-delimited director identifiers.}
-          - {name: writers, description: Comma-delimited writer identifiers.}
+          - {name: directors, description: "Comma-delimited nconsts of the title's director(s)."}
+          - {name: writers, description: "Comma-delimited nconsts of the title's writer(s)."}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: title_episode
         description: Episode-to-series relationships.
         columns:
-          - {name: tconst, description: IMDb episode title identifier.}
-          - {name: parentTconst, description: IMDb parent series identifier.}
-          - {name: seasonNumber, description: Raw season number.}
-          - {name: episodeNumber, description: Raw episode number.}
+          - {name: tconst, description: Alphanumeric identifier of the episode.}
+          - {name: parentTconst, description: Alphanumeric identifier of the parent TV series.}
+          - {name: seasonNumber, description: Season number the episode belongs to.}
+          - {name: episodeNumber, description: Episode number of the tconst within the TV series.}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: title_principals
         description: Principal credits for each title.
         columns:
           - {name: tconst, description: IMDb title identifier.}
-          - {name: ordering, description: Credit ordering within the title.}
-          - {name: nconst, description: IMDb person identifier.}
-          - {name: category, description: Principal credit category.}
-          - {name: job, description: Specific job text.}
-          - {name: characters, description: JSON array of character names.}
+          - {name: ordering, description: A number that uniquely identifies rows for a given titleId.}
+          - {name: nconst, description: Alphanumeric unique identifier of the name/person.}
+          - {name: category, description: The category of job that person was credited in.}
+          - {name: job, description: "The specific job title if applicable, else '\\N'."}
+          - {name: characters, description: "The character(s) played if applicable, else '\\N'; IMDb encodes this as a JSON-style array string in the raw file."}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: title_ratings
         description: Aggregate title ratings and vote counts.
         columns:
           - {name: tconst, description: IMDb title identifier.}
-          - {name: averageRating, description: Raw average rating.}
-          - {name: numVotes, description: Raw vote count.}
+          - {name: averageRating, description: Weighted average of all the individual user ratings.}
+          - {name: numVotes, description: Number of votes the title has received.}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: name_basics
         description: Core person attributes and known-for titles.
         columns:
-          - {name: nconst, description: IMDb person identifier.}
-          - {name: primaryName, description: Primary person name.}
-          - {name: birthYear, description: Raw birth year.}
-          - {name: deathYear, description: Raw death year.}
-          - {name: primaryProfession, description: Comma-delimited professions.}
-          - {name: knownForTitles, description: Comma-delimited known-for title identifiers.}
+          - {name: nconst, description: Alphanumeric unique identifier of the name/person.}
+          - {name: primaryName, description: Name by which the person is most often credited.}
+          - {name: birthYear, description: "Birth year (YYYY)."}
+          - {name: deathYear, description: "Death year (YYYY) if applicable, else '\\N'."}
+          - {name: primaryProfession, description: Comma-delimited list of the top-3 professions of the person.}
+          - {name: knownForTitles, description: Comma-delimited tconsts of titles the person is known for.}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: ingestion_files
         description: Verified source manifest metadata associated with each dlt load.

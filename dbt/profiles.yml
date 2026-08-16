@@ -3,7 +3,7 @@ imdb_ducklake:
   outputs:
     dev:
       type: duckdb
-      path: "{{ env_var('IMDB_DUCKLAKE_DBT_CONTROLLER', '../data/dbt/controller.duckdb') }}"
+      path: "{{ env_var('IMDB_DUCKLAKE_DBT_CONTROLLER', 'data/.dbt/controller.duckdb') }}"
       schema: main
       threads: 1
       settings:
@@ -12,8 +12,8 @@ imdb_ducklake:
       extensions:
         - ducklake
       attach:
-        - path: "ducklake:{{ env_var('IMDB_DUCKLAKE_CATALOG', '../data/ducklake/current/catalog.duckdb') }}"
+        - path: "ducklake:{{ env_var('IMDB_DUCKLAKE_CATALOG', 'data/ducklake/current/catalog.duckdb') }}"
           alias: imdb_lake
           options:
-            data_path: "{{ env_var('IMDB_DUCKLAKE_STORAGE', '../data/ducklake/current/storage') }}"
+            data_path: "{{ env_var('IMDB_DUCKLAKE_STORAGE', 'data/ducklake/current/storage') }}"
             override_data_path: true
