@@ -9,7 +9,8 @@ endif
 GH_PAGES_DIR := ../imdb-ducklake-gh-pages
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
-	publish-docs package ci download ingest transform build validate promote checkpoint shell
+	publish-docs package ci download ingest transform build validate promote checkpoint shell \
+	shell-ui
 
 help:
 	@echo "Setup"
@@ -44,6 +45,7 @@ help:
 	@echo "  make promote         promote a staged build (add ARGS=--build-id=... as needed)"
 	@echo "  make checkpoint      compact and expire snapshots on the current build"
 	@echo "  make shell           interactive SQL shell read-only attached to the current build"
+	@echo "  make shell-ui        same, and opens DuckDB's local web UI in your browser"
 
 sync:
 	uv sync --locked
@@ -95,6 +97,9 @@ ci: format-check lint sql-lint typecheck dbt-parse coverage package
 
 shell:
 	uv run python scripts/duckdb_shell.py
+
+shell-ui:
+	uv run python scripts/duckdb_shell.py --ui
 
 download:
 	uv run imdb-lakehouse download $(ARGS)
