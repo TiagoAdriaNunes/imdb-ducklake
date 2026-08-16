@@ -1,0 +1,26 @@
+[sqlfluff]
+templater = jinja
+dialect = duckdb
+max_line_length = 100
+# RF06 (references.quoting) is disabled: raw columns are dlt-loaded with IMDb's exact camelCase
+# TSV headers (see datasets.py). DuckDB case-folds unquoted identifiers to lowercase, so
+# "unquoting" these as RF06 suggests would silently break every staging model's column reference.
+# ST07 (structure.using) is disabled: intermediate/mart models consistently and deliberately use
+# USING (tconst)-style equi-joins on matching natural keys; rewriting to ON is a style opinion,
+# not a defect.
+# RF04 (references.keywords) is disabled: it flags `types`/`attributes`, which are IMDb's actual
+# published field names (see docs/adr and dbt/models/sources/imdb.yml), not accidental keyword
+# collisions.
+exclude_rules = references.quoting, structure.using, references.keywords
+
+[sqlfluff:templater:jinja]
+apply_dbt_builtins = True
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+capitalisation_policy = lower

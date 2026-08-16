@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=6.2,<8",
     "respx>=0.22,<1",
     "ruff>=0.12,<1",
+    "sqlfluff>=4.3.0",
 ]
 
 [tool.ruff]
