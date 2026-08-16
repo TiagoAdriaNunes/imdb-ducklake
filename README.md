@@ -19,7 +19,9 @@ The project uses:
 
 The end-to-end data flow, package dependency rules, failure boundaries, and dbt lineage are
 documented in [`docs/architecture.md`](docs/architecture.md). Architectural decisions are recorded
-under [`docs/adr/`](docs/adr/README.md).
+under [`docs/adr/`](docs/adr/README.md). Generated dbt docs (model/column reference, lineage graph,
+compiled SQL) are published at
+**[tiagoadrianunes.github.io/imdb-ducklake](https://tiagoadrianunes.github.io/imdb-ducklake/)**.
 
 ## Modules
 
