@@ -2,6 +2,8 @@
 
 Falls back to a minimal Python REPL if the DuckDB CLI isn't installed
 (https://duckdb.org/install), since the `duckdb` PyPI package doesn't bundle it.
+
+Pass --ui to open DuckDB's local web UI instead of/alongside the terminal shell.
 """
 
 from __future__ import annotations
@@ -53,20 +55,23 @@ def _attach_sql(catalog_path: Path, storage_dir: Path) -> str:
     )
 
 
-def _run_real_cli(executable: str, attach_sql: str) -> None:
+def _run_real_cli(executable: str, attach_sql: str, *, ui: bool) -> None:
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sql", delete=False, encoding="utf-8"
     ) as init_file:
         init_file.write(attach_sql)
         init_path = init_file.name
+    command = [executable, "-init", init_path]
+    if ui:
+        command.append("-ui")
     try:
-        result = subprocess.run([executable, "-init", init_path], check=False)
+        result = subprocess.run(command, check=False)
     finally:
         os.unlink(init_path)
     raise SystemExit(result.returncode)
 
 
-def _run_python_fallback(attach_sql: str) -> None:
+def _run_python_fallback(attach_sql: str, *, ui: bool) -> None:
     # duckdb's table rendering uses box-drawing characters that the default Windows console
     # codepage (cp1252) can't encode, especially when stdout isn't a real TTY.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -75,6 +80,11 @@ def _run_python_fallback(attach_sql: str) -> None:
         if statement.strip():
             connection.execute(statement)
     print("DuckDB CLI not found (https://duckdb.org/install) - using a minimal Python fallback.")
+    if ui:
+        connection.execute("INSTALL ui")
+        connection.execute("LOAD ui")
+        connection.execute("CALL start_ui()")
+        print("UI started in your browser (CALL stop_ui_server(); to close it).")
     print(f"Attached read-only as '{_ATTACH_ALIAS}'. SQL ending in ';' runs it; .exit to quit.\n")
 
     buffer = ""
@@ -96,6 +106,7 @@ def _run_python_fallback(attach_sql: str) -> None:
 
 
 def main() -> None:
+    ui = "--ui" in sys.argv[1:]
     settings = Settings.load()
     catalog_path = settings.current_dir / "catalog.duckdb"
     storage_dir = settings.current_dir / "storage"
@@ -105,9 +116,9 @@ def main() -> None:
     attach_sql = _attach_sql(catalog_path, storage_dir)
     executable = _find_duckdb()
     if executable:
-        _run_real_cli(executable, attach_sql)
+        _run_real_cli(executable, attach_sql, ui=ui)
     else:
-        _run_python_fallback(attach_sql)
+        _run_python_fallback(attach_sql, ui=ui)
 
 
 if __name__ == "__main__":
