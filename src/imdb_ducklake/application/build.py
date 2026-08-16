@@ -196,6 +196,7 @@ def build_lakehouse(
                 stage="validation",
                 status="completed",
                 relation_count=validation.relation_count,
+                mart_count=len(validation.mart_row_counts),
                 mart_row_counts=validation.mart_row_counts,
             )
 

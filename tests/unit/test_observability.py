@@ -30,6 +30,9 @@ def test_json_logging_includes_bound_context_and_typed_fields() -> None:
         stage="ingestion",
         dataset="title_basics",
         rows=42,
+        dbt_stream="stdout",
+        dbt_message="05:12:41  Dataset completed",
+        mart_row_counts={"mart_title_search": 42},
     )
 
     payload = json.loads(stream.getvalue())
@@ -42,6 +45,9 @@ def test_json_logging_includes_bound_context_and_typed_fields() -> None:
     assert record["extra"]["stage"] == "ingestion"
     assert record["extra"]["dataset"] == "title_basics"
     assert record["extra"]["rows"] == 42
+    assert record["extra"]["dbt_stream"] == "stdout"
+    assert record["extra"]["dbt_message"] == "05:12:41  Dataset completed"
+    assert record["extra"]["mart_row_counts"] == {"mart_title_search": 42}
     assert record["time"]["timestamp"] > 0
 
 
@@ -74,6 +80,10 @@ def test_console_logging_is_human_readable() -> None:
         build_id="build-123456789",
         available_bytes=61_782_441_984,
         required_bytes=17_299_953_907,
+        elapsed_seconds=1088.3,
+        dbt_stream="stdout",
+        dbt_message="05:12:41  Completed successfully",
+        mart_row_counts={"mart_title_search": 12_717_779},
     )
 
     output = stream.getvalue()
@@ -83,7 +93,11 @@ def test_console_logging_is_human_readable() -> None:
     assert "build=build-12" in output
     assert "available=57.5GiB" in output
     assert "required=16.1GiB" in output
+    assert "elapsed=18m08s" in output
     assert "component=test.logger" in output
+    assert "dbt_stream=" not in output
+    assert "dbt_message=" not in output
+    assert "mart_row_counts=" not in output
     assert "stage=" not in output
     assert "status=" not in output
     assert "_bytes=" not in output

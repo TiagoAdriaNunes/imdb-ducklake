@@ -146,7 +146,9 @@ def _default_output_handler(build_id: str) -> DbtOutputHandler:
     dbt_logger = logger.bind(build_id=build_id)
 
     def log_output(stream_name: str, message: str) -> None:
-        display_message = _DBT_TIMESTAMP_PATTERN.sub("", message)
+        display_message = _DBT_TIMESTAMP_PATTERN.sub("", message).strip()
+        if not display_message:
+            return
         dbt_logger.info(
             "dbt | {}",
             display_message,
