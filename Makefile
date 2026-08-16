@@ -1,6 +1,6 @@
 GH_PAGES_DIR := ../imdb-ducklake-gh-pages
 
-.PHONY: help sync format format-check lint typecheck dbt-parse test smoke coverage docs \
+.PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint
 
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "  make format-check    ruff format --check ."
 	@echo "  make format          ruff format . (rewrites files)"
 	@echo "  make lint            ruff check ."
+	@echo "  make sql-lint        sqlfluff lint dbt/models dbt/tests"
 	@echo "  make typecheck       mypy src"
 	@echo "  make dbt-parse       dbt parse --project-dir dbt --profiles-dir dbt"
 	@echo "  make coverage        pytest -m 'not smoke' --cov=imdb_ducklake --cov-fail-under=85"
@@ -45,6 +46,9 @@ format-check:
 
 lint:
 	uv run ruff check .
+
+sql-lint:
+	uv run sqlfluff lint dbt/models dbt/tests
 
 typecheck:
 	uv run mypy src
