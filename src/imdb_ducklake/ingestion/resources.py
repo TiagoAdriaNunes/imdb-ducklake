@@ -26,13 +26,17 @@ def _read_csv_duckdb_arrow(
     chunk_size: int,
     **duckdb_options: Any,
 ) -> Iterator[Any]:
-    """Stream CSV files as Arrow batches through DuckDB's current reader API."""
+    """Stream CSV files as Arrow batches through DuckDB's current reader API.
+
+    Reads the path with ``compression="gzip"`` instead of a file object: a
+    file object routes through DuckDB's PythonFilesystem, which buffers the
+    whole decompressed file in memory first and OOMs on multi-GB archives.
+    """
     import duckdb
 
     for item in items:
-        with item.open() as file_object:
-            relation = duckdb.from_csv_auto(file_object, **duckdb_options)
-            yield from relation.to_arrow_reader(batch_size=chunk_size)
+        relation = duckdb.read_csv(item.local_file_path, compression="gzip", **duckdb_options)
+        yield from relation.to_arrow_reader(batch_size=chunk_size)
 
 
 read_csv_duckdb_arrow = dlt.transformer()(_read_csv_duckdb_arrow)
