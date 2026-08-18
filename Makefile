@@ -10,7 +10,7 @@ GH_PAGES_DIR := ../imdb-ducklake-gh-pages
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
-	shell-ui
+	shell-ui clean-dlt-pipelines
 
 help:
 	@echo "Setup"
@@ -46,6 +46,7 @@ help:
 	@echo "  make checkpoint      compact and expire snapshots on the current build"
 	@echo "  make shell           interactive SQL shell read-only attached to the current build"
 	@echo "  make shell-ui        same, and opens DuckDB's local web UI in your browser"
+	@echo "  make clean-dlt-pipelines  delete old dlt working dirs, keep the newest KEEP=3"
 
 sync:
 	uv sync --locked
@@ -121,3 +122,12 @@ promote:
 
 checkpoint:
 	uv run imdb-lakehouse checkpoint $(ARGS)
+
+KEEP ?= 3
+clean-dlt-pipelines:
+	@cd data/.dlt/pipelines 2>/dev/null || exit 0; \
+	victims=$$(ls -t | tail -n +$$(($(KEEP) + 1))); \
+	if [ -z "$$victims" ]; then echo "nothing to clean (KEEP=$(KEEP))"; exit 0; fi; \
+	echo "$$victims"; \
+	if [ "$(DRY)" = "1" ]; then echo "(dry run, nothing deleted; rerun without DRY=1)"; exit 0; fi; \
+	echo "$$victims" | xargs -r rm -rf --
