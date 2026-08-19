@@ -10,7 +10,7 @@ GH_PAGES_DIR := ../imdb-ducklake-gh-pages
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
-	shell-ui clean-dlt-pipelines
+	shell-ui clean-dlt-pipelines upload-bucket
 
 help:
 	@echo "Setup"
@@ -47,6 +47,7 @@ help:
 	@echo "  make shell           interactive SQL shell read-only attached to the current build"
 	@echo "  make shell-ui        same, and opens DuckDB's local web UI in your browser"
 	@echo "  make clean-dlt-pipelines  delete old dlt working dirs, keep the newest KEEP=3"
+	@echo "  make upload-bucket   hf sync data/ducklake/current to \$$HF_BUCKET (required, e.g. hf://buckets/<you>/<name>)"
 
 sync:
 	uv sync --locked
@@ -131,3 +132,7 @@ clean-dlt-pipelines:
 	echo "$$victims"; \
 	if [ "$(DRY)" = "1" ]; then echo "(dry run, nothing deleted; rerun without DRY=1)"; exit 0; fi; \
 	echo "$$victims" | xargs -r rm -rf --
+
+upload-bucket:
+	@test -n "$(HF_BUCKET)" || { echo "set HF_BUCKET, e.g. HF_BUCKET=hf://buckets/<you>/<name> make upload-bucket"; exit 1; }
+	hf sync ./data/ducklake/current $(HF_BUCKET) $(ARGS)
