@@ -20,9 +20,10 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
         f"(DATA_PATH '{storage_dir.as_posix()}', OVERRIDE_DATA_PATH true)"
     )
     connection.execute("USE imdb_lake")
+    connection.execute("create schema marts")
     connection.execute(
         """
-        create table mart_title_search (
+        create table marts.mart_title_search (
             tconst varchar,
             title_type varchar,
             primary_title varchar,
@@ -42,7 +43,7 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
     )
     connection.execute(
         """
-        insert into mart_title_search values
+        insert into marts.mart_title_search values
             ('tt0000001', 'movie', 'The Matrix', 'The Matrix', false, 1999, NULL,
              136, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
              ['Keanu Reeves'], 'load1'),

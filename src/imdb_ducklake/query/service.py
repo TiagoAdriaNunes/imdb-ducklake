@@ -48,13 +48,13 @@ def search_titles(
     """Search mart_title_search by title substring, ordered by vote count descending."""
     if query.strip():
         return connection.sql(
-            "select * from mart_title_search "
+            "select * from marts.mart_title_search "
             "where primary_title ilike '%' || ? || '%' "
             "order by num_votes desc nulls last "
             "limit ?",
             params=[query, limit],
         )
     return connection.sql(
-        "select * from mart_title_search order by num_votes desc nulls last limit ?",
+        "select * from marts.mart_title_search order by num_votes desc nulls last limit ?",
         params=[limit],
     )
