@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 app = [
     "great-tables>=0.17,<1",
+    "pandas>=2,<3",
     "shiny>=1.4,<2",
 ]
 
