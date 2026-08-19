@@ -19,8 +19,8 @@ import duckdb
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import ImdbLakehouseError
+from imdb_ducklake.query.service import ATTACH_ALIAS, attach_sql
 
-_ATTACH_ALIAS = "imdb_lake"
 # `winget install <id>` always lands packages under this fixed, non-machine-specific suffix
 # (the Microsoft Store publisher ID for winget-manifest installs), and appends it to the User
 # PATH registry value - but an already-running terminal keeps the environment it started with,
@@ -43,16 +43,6 @@ def _find_duckdb() -> str | None:
     if _WINGET_DUCKDB_PATH.is_file():
         return str(_WINGET_DUCKDB_PATH)
     return None
-
-
-def _attach_sql(catalog_path: Path, storage_dir: Path) -> str:
-    return (
-        "INSTALL ducklake;\n"
-        "LOAD ducklake;\n"
-        f"ATTACH 'ducklake:{catalog_path.as_posix()}' AS {_ATTACH_ALIAS} "
-        f"(DATA_PATH '{storage_dir.as_posix()}', OVERRIDE_DATA_PATH true, READ_ONLY);\n"
-        f"USE {_ATTACH_ALIAS};\n"
-    )
 
 
 def _run_real_cli(executable: str, attach_sql: str, *, ui: bool) -> None:
@@ -85,7 +75,7 @@ def _run_python_fallback(attach_sql: str, *, ui: bool) -> None:
         connection.execute("LOAD ui")
         connection.execute("CALL start_ui()")
         print("UI started in your browser (CALL stop_ui_server(); to close it).")
-    print(f"Attached read-only as '{_ATTACH_ALIAS}'. SQL ending in ';' runs it; .exit to quit.\n")
+    print(f"Attached read-only as '{ATTACH_ALIAS}'. SQL ending in ';' runs it; .exit to quit.\n")
 
     buffer = ""
     while True:
@@ -113,12 +103,12 @@ def main() -> None:
     if not catalog_path.is_file():
         raise SystemExit(f"No promoted build found at {catalog_path}")
 
-    attach_sql = _attach_sql(catalog_path, storage_dir)
+    attach_sql_str = attach_sql(catalog_path, storage_dir)
     executable = _find_duckdb()
     if executable:
-        _run_real_cli(executable, attach_sql, ui=ui)
+        _run_real_cli(executable, attach_sql_str, ui=ui)
     else:
-        _run_python_fallback(attach_sql, ui=ui)
+        _run_python_fallback(attach_sql_str, ui=ui)
 
 
 if __name__ == "__main__":
