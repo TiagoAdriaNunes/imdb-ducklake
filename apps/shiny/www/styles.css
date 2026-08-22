@@ -6,6 +6,20 @@ body, body * {
     color: #000 !important;
 }
 
+/* body * above also matches two Bootstrap-injected full-viewport elements: .modal-backdrop
+   (the dimmer, normally translucent black) and the outer .modal wrapper itself (normally
+   transparent, sitting at an even higher z-index than the backdrop so it should let the
+   backdrop show through around the .modal-content dialog card). Forced to opaque white, the
+   .modal wrapper alone was enough to paint over the whole screen regardless of the backdrop
+   fix below it. Restore both; .modal-content (the actual dialog box) is untouched and stays
+   opaque white as expected. */
+.modal-backdrop {
+    background-color: #000 !important;
+}
+.modal {
+    background-color: transparent !important;
+}
+
 body {
     font-family: "Inter", system-ui, -apple-system, sans-serif;
 }

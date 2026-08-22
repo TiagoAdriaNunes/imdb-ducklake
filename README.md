@@ -51,16 +51,16 @@ compiled SQL) are published at
 ## Development
 
 ```console
-uv sync --locked
+make sync
 uv run pre-commit install
 uv run pre-commit run --all-files
 uv run imdb-lakehouse --help
-uv run ruff check .
-uv run pytest
+make lint
+make test
 ```
 
 Ordinary CI excludes tests marked `smoke`, because those tests require the complete local IMDb
-download. Run them deliberately with `uv run pytest -m smoke` after acquiring all seven archives.
+download. Run them deliberately with `make smoke` after acquiring all seven archives.
 
 Every command above, every quality gate, and every `imdb-lakehouse` pipeline stage is also
 available as an explicit `make` target; run `make help` for the full list, or `make ci` to run
@@ -79,9 +79,15 @@ command name to emit newline-delimited JSON for CI, schedulers, or log processor
 uv run imdb-lakehouse --log-format json build
 ```
 
-`IMDB_LAKEHOUSE_LOG_FORMAT=console|json` provides the equivalent environment configuration, and
-`IMDB_LAKEHOUSE_LOG_LEVEL` controls verbosity. Progress is reported every 10 seconds by default;
-set `IMDB_LAKEHOUSE_PROGRESS_INTERVAL_SECONDS` to a positive number to change the interval.
+That global option must precede the subcommand, so it cannot be passed through `make ... ARGS=...`
+(which appends after the subcommand); with `make`, set `LOG_FORMAT` instead:
+
+```console
+make build LOG_FORMAT=json
+```
+
+`IMDB_LAKEHOUSE_LOG_LEVEL` controls verbosity. Progress is reported every 10 seconds by default; set
+`IMDB_LAKEHOUSE_PROGRESS_INTERVAL_SECONDS` to a positive number to change the interval.
 
 Interactive terminals render live ingestion counters with Rich. Known totals include a percentage
 and ETA; unknown row totals show the processed count, rate, and elapsed time. JSON and redirected
@@ -109,8 +115,8 @@ The same event in `--log-format json` mode, one self-contained JSON object per l
 Install the locked dependencies and download all seven IMDb source archives:
 
 ```console
-uv sync --locked
-uv run imdb-lakehouse download
+make sync
+make download
 ```
 
 Verified archives are reused on later runs. If a transfer was interrupted, the downloader keeps
@@ -119,13 +125,13 @@ its `.part` file and resumes from the last saved byte when the server supports r
 To download every archive again even when a verified local copy exists:
 
 ```console
-uv run imdb-lakehouse download --force
+make download ARGS=--force
 ```
 
 To use a different repository-relative data directory:
 
 ```console
-uv run imdb-lakehouse download --data-dir ./local-imdb-data
+make download ARGS="--data-dir ./local-imdb-data"
 ```
 
 By default, archives are written to `data/raw/` and their source metadata, byte sizes, SHA-256
@@ -136,7 +142,7 @@ checksums, and acquisition batch IDs are recorded in `data/raw/manifest.json`.
 Run the complete safe workflow with one command:
 
 ```console
-uv run imdb-lakehouse build
+make build
 ```
 
 The command acquires the single-writer lock, reuses or downloads all seven verified archives,
@@ -146,17 +152,25 @@ it atomically replace `data/ducklake/current/`; any earlier failure leaves the e
 build unchanged. The previous current build is retained for rollback, and older retired or
 crash-orphaned workspaces are pruned on the next run.
 
+`build` is intentionally all-or-nothing: any failure anywhere in the pipeline, including a late
+`dbt build` test, discards the whole isolated workspace it created — even the already-ingested raw
+data. That is the right behavior for the one true reproducible build path, but it makes `build` the
+wrong tool for iterating on a dbt change: every retry re-runs the full multi-minute dlt ingestion
+even though the source archives never changed. Use `make ingest` once, then `make transform`
+repeatedly, instead — see
+["Ingest a raw snapshot"](#ingest-a-raw-snapshot) below.
+
 Running the command again reuses verified source archives but deliberately creates a fresh full
 snapshot. To reacquire every archive as well, use:
 
 ```console
-uv run imdb-lakehouse build --force-download
+make build ARGS=--force-download
 ```
 
 The data location is independent of where the repository is cloned:
 
 ```console
-uv run imdb-lakehouse build --data-dir ./local-imdb-data
+make build ARGS="--data-dir ./local-imdb-data"
 ```
 
 ## Validate a lakehouse
@@ -164,7 +178,7 @@ uv run imdb-lakehouse build --data-dir ./local-imdb-data
 Validate the active `current/` build without supplying catalog or storage paths:
 
 ```console
-uv run imdb-lakehouse validate
+make validate
 ```
 
 When no current build exists, the command automatically validates the sole staged build instead.
@@ -176,14 +190,14 @@ select one explicitly with `--build-id`; `--data-dir` uses the same override as 
 Promote an already transformed staged build without repeating acquisition, ingestion, or dbt:
 
 ```console
-uv run imdb-lakehouse promote --build-id 20260815T123000Z-abc123
+make promote ARGS="--build-id 20260815T123000Z-abc123"
 ```
 
 After a successful promotion and current-catalog validation, optionally remove other staged builds
 and older retired versions while retaining the newest rollback build:
 
 ```console
-uv run imdb-lakehouse promote --build-id 20260815T123000Z-abc123 --prune
+make promote ARGS="--build-id 20260815T123000Z-abc123 --prune"
 ```
 
 The command holds the single-writer lock, validates the staged catalog through a fresh read-only
@@ -197,7 +211,7 @@ Compact the active DuckLake build and expire obsolete snapshots without rerunnin
 ingestion, dbt, validation, or promotion:
 
 ```console
-uv run imdb-lakehouse checkpoint
+make checkpoint
 ```
 
 The command acquires the lakehouse build lock and operates only on `data/ducklake/current/`. It
@@ -227,7 +241,7 @@ does not yet have a more specific subtype exits with code 1.
 Load all seven retained archives into a new isolated DuckLake build:
 
 ```console
-uv run imdb-lakehouse ingest
+make ingest
 ```
 
 The command revalidates every archive against the manifest before loading it. It prints the build
@@ -240,14 +254,14 @@ schema and dlt load-package identifiers.
 Use the same data-directory override as the download command when the archives are elsewhere:
 
 ```console
-uv run imdb-lakehouse ingest --data-dir ./local-imdb-data
+make ingest ARGS="--data-dir ./local-imdb-data"
 ```
 
 If a staged ingestion already exists, the command preserves it and stops instead of repeating the
 load. Discard that unpromoted build and ingest a fresh snapshot explicitly with:
 
 ```console
-uv run imdb-lakehouse ingest --replace-staged
+make ingest ARGS=--replace-staged
 ```
 
 ## Transform and test a staged build
@@ -255,7 +269,7 @@ uv run imdb-lakehouse ingest --replace-staged
 After ingestion, run every dbt model and data-quality test against the staged DuckLake build:
 
 ```console
-uv run imdb-lakehouse transform
+make transform
 ```
 
 The command builds the `staging`, `intermediate`, and `marts` schemas and prints dbt's complete
@@ -265,12 +279,17 @@ as separate rollups to keep peak DuckDB memory bounded. If more than one staged 
 select the build ID printed by ingestion:
 
 ```console
-uv run imdb-lakehouse transform --build-id 20260815T123000Z-abc123
+make transform ARGS="--build-id 20260815T123000Z-abc123"
 ```
 
 Use `--data-dir` when ingestion used a custom data directory. A successful transformation remains
 staged for inspection; run `promote` to validate and activate it, or use the full `build` command to
 perform an isolated end-to-end run before promotion.
+
+Unlike `build`, `transform` never deletes the staged build it runs against, even when a dbt model
+or test fails. That makes `ingest` once + `transform` on repeat the right workflow when iterating on
+a dbt change: fix the model, rerun `make transform`, and only the (fast) dbt stage re-executes — the
+multi-minute dlt ingestion of the seven raw archives is not repeated.
 
 ## Query the analytical marts
 

@@ -31,15 +31,25 @@ def _read_csv_duckdb_arrow(
     Reads the path with ``compression="gzip"`` instead of a file object: a
     file object routes through DuckDB's PythonFilesystem, which buffers the
     whole decompressed file in memory first and OOMs on multi-GB archives.
+
+    Opens its own connection rather than using DuckDB's implicit shared default
+    connection: this transformer runs ``parallelized``, so concurrent extraction of two
+    archives on the shared default connection would corrupt or fail each other's queries.
     """
     import duckdb
 
-    for item in items:
-        relation = duckdb.read_csv(item.local_file_path, compression="gzip", **duckdb_options)
-        yield from relation.to_arrow_reader(batch_size=chunk_size)
+    connection = duckdb.connect(":memory:")
+    try:
+        for item in items:
+            relation = connection.read_csv(
+                item.local_file_path, compression="gzip", **duckdb_options
+            )
+            yield from relation.to_arrow_reader(batch_size=chunk_size)
+    finally:
+        connection.close()
 
 
-read_csv_duckdb_arrow = dlt.transformer()(_read_csv_duckdb_arrow)
+read_csv_duckdb_arrow = dlt.transformer(parallelized=True)(_read_csv_duckdb_arrow)
 
 
 def build_ingestion_resources(
