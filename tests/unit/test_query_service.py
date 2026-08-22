@@ -38,6 +38,7 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
             genres varchar[],
             directors varchar[],
             principal_cast varchar[],
+            principal_cast_ids varchar[],
             dlt_load_id varchar
         )
         """
@@ -48,19 +49,19 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
         insert into marts.mart_title_search values
             ('tt0000001', 'movie', 'The Matrix', 'The Matrix', false, 1999, NULL,
              136, NULL, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
-             ['Keanu Reeves'], 'load1'),
+             ['Keanu Reeves'], ['nm0000206'], 'load1'),
             ('tt0000002', 'movie', 'The Matrix Reloaded', 'The Matrix Reloaded', false,
              2003, NULL, 138, NULL, 7.2, 700000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
-             ['Keanu Reeves'], 'load1'),
+             ['Keanu Reeves'], ['nm0000206'], 'load1'),
             ('tt0000003', 'movie', 'Inception', 'Inception', false, 2010, NULL,
              148, NULL, 8.8, 2300000, ['Action', 'Sci-Fi'], ['Christopher Nolan'],
-             ['Leonardo DiCaprio'], 'load1'),
+             ['Leonardo DiCaprio'], ['nm0000138'], 'load1'),
             ('tt0000004', 'tvSeries', 'Breaking Bad', 'Breaking Bad', false, 2008, 2013,
              47, 62, 9.5, 2100000, ['Crime', 'Drama'], ['Vince Gilligan'],
-             ['Bryan Cranston'], 'load1'),
+             ['Bryan Cranston'], ['nm0186505'], 'load1'),
             ('tt0000005', 'short', 'Bao', 'Bao', false, 2018, NULL,
              8, NULL, 8.1, 90000, ['Animation', 'Comedy', 'Drama'], ['Domee Shi'],
-             ['Domee Shi'], 'load1')
+             ['Domee Shi'], ['nm2867732'], 'load1')
         """
     )
     connection.close()
@@ -97,6 +98,15 @@ def test_search_titles_filters_by_query(settings_with_fixture_build: Settings) -
 
     assert sorted(tconsts) == ["tt0000001", "tt0000002"]
     assert tconsts == ["tt0000001", "tt0000002"]  # ordered by num_votes desc
+
+
+def test_search_titles_returns_cast_ids(settings_with_fixture_build: Settings) -> None:
+    connection = connect_readonly(settings_with_fixture_build)
+
+    frame = search_titles(connection, "matrix", title_type="movie").df()
+
+    assert frame.loc[0, "Cast"] == "Keanu Reeves"
+    assert frame.loc[0, "Cast IDs"] == "nm0000206"
 
 
 def test_search_titles_empty_query_returns_top_by_votes(

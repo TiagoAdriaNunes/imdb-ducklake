@@ -21,6 +21,7 @@ select
     genres.genres,
     directors.directors,
     principals.principal_cast,
+    principals.principal_cast_ids,
     titles.dlt_load_id
 from {{ ref('dim_titles') }} as titles
 left join episode_counts using (tconst)
