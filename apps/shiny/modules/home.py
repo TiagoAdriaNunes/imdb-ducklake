@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import html
 import re
-from pathlib import Path
 
 import pandas as pd
-from itables.shiny import DT, init_itables
-from shiny import render, ui
+from itables.shiny import DT
+from shiny import module, render, ui
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
@@ -19,9 +18,8 @@ _WRAP_WIDTH_PX = 320
 _WRAP_STYLE = (
     f"display:inline-block;max-width:{_WRAP_WIDTH_PX}px;white-space:normal;word-break:break-word;"
 )
-_NARROW_COLUMNS = ("IMDb ID", "Type", "Years", "Runtime (min)", "Rating", "Votes")
+_NARROW_COLUMNS = ("IMDb ID", "Rating", "Votes")
 _NARROW_WIDTH_PX = 70
-_APP_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _title_cell(primary: str, original: str) -> str:
@@ -38,53 +36,37 @@ def _format_title_type(value: str) -> str:
     return " ".join("TV" if word.lower() == "tv" else word.capitalize() for word in words)
 
 
-_SEARCHABLE_TYPES = ("movie", "tvSeries")
-
-
-def _years_cell(start: object, end: object) -> str:
+def _year_cell(start: object) -> str:
     if pd.isna(start):
         return ""
-    if pd.isna(end):
-        return str(int(start))
-    return f"{int(start)}-{int(end)}"
+    return str(int(start))
 
 
-app_ui = ui.page_fluid(
-    ui.tags.head(
-        ui.tags.meta(name="color-scheme", content="light"),
-        ui.tags.link(rel="preconnect", href="https://fonts.googleapis.com"),
-        ui.tags.link(
-            rel="stylesheet",
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+@module.ui
+def titles_ui(title: str, search_placeholder: str):
+    """Build one title-type tab with an independent search field and result table."""
+    return ui.TagList(
+        ui.card(
+            ui.card_header(f"Search {title}"),
+            ui.input_text("query", "Search", placeholder=search_placeholder),
         ),
-        ui.HTML(init_itables()),
-        ui.include_css(_APP_ROOT / "www" / "styles.css"),
-    ),
-    ui.div({"class": "app-navbar"}, ui.h2("IMDb Title Search")),
-    ui.card(
-        ui.card_header("Search Titles"),
-        ui.layout_columns(
-            ui.input_text("query", "Search", placeholder="e.g. The Matrix"),
-            ui.input_selectize(
-                "types",
-                "Type",
-                choices={t: _format_title_type(t) for t in _SEARCHABLE_TYPES},
-                selected=["movie"],
-                multiple=True,
-                options={"dropdownParent": "body"},
-            ),
-            col_widths=[4, 3],
+        ui.card(
+            ui.card_header("Results"),
+            ui.output_ui("results"),
         ),
-    ),
-    ui.card(
-        ui.card_header("Results"),
-        ui.output_ui("results"),
-    ),
-    theme=ui.Theme(preset="shiny"),
-)
+    )
 
 
-def server(input, output, session):
+@module.server
+def titles_server(
+    input,
+    output,
+    session,
+    *,
+    title_type: str,
+    show_end_year: bool,
+) -> None:
+    """Serve one title-type tab from the promoted DuckLake build."""
     settings = Settings.load()
     startup_error: str | None = None
     connection = None
@@ -99,36 +81,41 @@ def server(input, output, session):
         if startup_error is not None or connection is None:
             ui.notification_show(startup_error, type="error", duration=None)
             return ui.p("No promoted build available. Run `make build` first.")
-        selected_types = list(input.types())
         frame = search_titles(
-            connection, input.query() or "", title_types=selected_types or None, limit=500
+            connection, input.query() or "", title_type=title_type, limit=500
         ).df()
         if frame.empty:
             return ui.p("No titles matched.")
 
-        frame["Type"] = frame["Type"].map(_format_title_type)
         frame["Title"] = [
             _title_cell(p, o)
             for p, o in zip(frame["Primary Title"], frame["Original Title"], strict=True)
         ]
-        frame["Years"] = [
-            _years_cell(s, e) for s, e in zip(frame["Start Year"], frame["End Year"], strict=True)
+        if show_end_year:
+            year_columns = ["Start Year", "End Year"]
+            for column in year_columns:
+                frame[column] = frame[column].map(_year_cell)
+        else:
+            frame["Year"] = frame["Start Year"].map(_year_cell)
+            year_columns = ["Year"]
+        runtime_column = "Episode runtime (min)" if show_end_year else "Runtime (min)"
+        frame = frame.rename(columns={"Runtime (min)": runtime_column})
+        columns_to_drop = ["Primary Title", "Original Title", "Type"]
+        if not show_end_year:
+            columns_to_drop.extend(["Start Year", "End Year"])
+        if not show_end_year:
+            columns_to_drop.append("Episodes")
+        frame = frame.drop(columns=columns_to_drop, errors="ignore")
+        result_columns = [
+            "IMDb ID",
+            "Title",
+            *year_columns,
+            runtime_column,
         ]
-        frame = frame.drop(columns=["Primary Title", "Original Title", "Start Year", "End Year"])
-        frame = frame[
-            [
-                "IMDb ID",
-                "Type",
-                "Title",
-                "Years",
-                "Runtime (min)",
-                "Rating",
-                "Votes",
-                "Genres",
-                "Directors",
-                "Cast",
-            ]
-        ]
+        if show_end_year:
+            result_columns.append("Episodes")
+        result_columns.extend(["Rating", "Votes", "Genres", "Directors", "Cast"])
+        frame = frame[result_columns]
         for column in _WRAP_COLUMNS:
             frame[column] = frame[column].map(
                 lambda value: f'<span style="{_WRAP_STYLE}">{html.escape(str(value))}</span>'
@@ -136,7 +123,10 @@ def server(input, output, session):
 
         column_defs = [
             {
-                "targets": [frame.columns.get_loc(c) for c in _NARROW_COLUMNS],
+                "targets": [
+                    frame.columns.get_loc(c)
+                    for c in (*_NARROW_COLUMNS, *year_columns, runtime_column)
+                ],
                 "width": f"{_NARROW_WIDTH_PX}px",
             },
             {
