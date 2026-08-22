@@ -5,7 +5,7 @@ import pytest
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
-from imdb_ducklake.query.service import connect_readonly, search_titles
+from imdb_ducklake.query.service import connect_readonly, get_title_cast, search_titles
 
 
 def _build_fixture_lakehouse(current_dir: Path) -> None:
@@ -37,11 +37,7 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
             num_votes bigint,
             genres varchar[],
             directors varchar[],
-            director_ids varchar[],
             writers varchar[],
-            writer_ids varchar[],
-            principal_cast varchar[],
-            principal_cast_ids varchar[],
             dlt_load_id varchar
         )
         """
@@ -51,26 +47,52 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
         """
         insert into marts.mart_title_search values
             ('tt0000001', 'movie', 'The Matrix', 'The Matrix', false, 1999, NULL,
-             136, NULL, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'], ['nm0905154'],
-             ['Lana Wachowski', 'Lilly Wachowski'], ['nm0905154', 'nm0905152'],
-             ['Keanu Reeves'], ['nm0000206'], 'load1'),
+             136, NULL, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
+             ['Lana Wachowski', 'Lilly Wachowski'], 'load1'),
             ('tt0000002', 'movie', 'The Matrix Reloaded', 'The Matrix Reloaded', false,
              2003, NULL, 138, NULL, 7.2, 700000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
-             ['nm0905154'],
-             ['Lana Wachowski', 'Lilly Wachowski'], ['nm0905154', 'nm0905152'],
-             ['Keanu Reeves'], ['nm0000206'], 'load1'),
+             ['Lana Wachowski', 'Lilly Wachowski'], 'load1'),
             ('tt0000003', 'movie', 'Inception', 'Inception', false, 2010, NULL,
-             148, NULL, 8.8, 2300000, ['Action', 'Sci-Fi'], ['Christopher Nolan'], ['nm0634240'],
-             ['Christopher Nolan'], ['nm0634240'],
-             ['Leonardo DiCaprio'], ['nm0000138'], 'load1'),
+             148, NULL, 8.8, 2300000, ['Action', 'Sci-Fi'], ['Christopher Nolan'],
+             ['Christopher Nolan'], 'load1'),
             ('tt0000004', 'tvSeries', 'Breaking Bad', 'Breaking Bad', false, 2008, 2013,
-             47, 62, 9.5, 2100000, ['Crime', 'Drama'], ['Vince Gilligan'], ['nm0319213'],
-             ['Vince Gilligan'], ['nm0319213'],
-             ['Bryan Cranston'], ['nm0186505'], 'load1'),
+             47, 62, 9.5, 2100000, ['Crime', 'Drama'], ['Vince Gilligan'],
+             ['Vince Gilligan'], 'load1'),
             ('tt0000005', 'short', 'Bao', 'Bao', false, 2018, NULL,
-             8, NULL, 8.1, 90000, ['Animation', 'Comedy', 'Drama'], ['Domee Shi'], ['nm2867732'],
-             ['Domee Shi'], ['nm2867732'],
-             ['Domee Shi'], ['nm2867732'], 'load1')
+             8, NULL, 8.1, 90000, ['Animation', 'Comedy', 'Drama'], ['Domee Shi'],
+             ['Domee Shi'], 'load1')
+        """
+    )
+    connection.execute(
+        """
+        create table marts.mart_person_filmography (
+            nconst varchar,
+            primary_name varchar,
+            tconst varchar,
+            primary_title varchar,
+            title_type varchar,
+            start_year integer,
+            ordering integer,
+            category varchar,
+            job varchar,
+            characters varchar[],
+            average_rating double,
+            num_votes bigint,
+            dlt_load_id varchar
+        )
+        """
+    )
+    connection.execute(
+        """
+        insert into marts.mart_person_filmography values
+            ('nm0000401', 'Carrie-Anne Moss', 'tt0000001', 'The Matrix', 'movie',
+             1999, 2, 'actress', NULL, ['Trinity'], 8.7, 2000000, 'load1'),
+            ('nm0000206', 'Keanu Reeves', 'tt0000001', 'The Matrix', 'movie',
+             1999, 1, 'actor', NULL, ['Neo'], 8.7, 2000000, 'load1'),
+            ('nm0905154', 'Lana Wachowski', 'tt0000001', 'The Matrix', 'movie',
+             1999, NULL, 'director', NULL, NULL, 8.7, 2000000, 'load1'),
+            ('nm-missing', NULL, 'tt0000002', 'The Matrix Reloaded', 'movie',
+             2003, 1, 'self', NULL, NULL, 7.2, 700000, 'load1')
         """
     )
     connection.close()
@@ -109,17 +131,45 @@ def test_search_titles_filters_by_query(settings_with_fixture_build: Settings) -
     assert tconsts == ["tt0000001", "tt0000002"]  # ordered by num_votes desc
 
 
-def test_search_titles_returns_person_ids(settings_with_fixture_build: Settings) -> None:
+def test_search_titles_returns_person_names(settings_with_fixture_build: Settings) -> None:
     connection = connect_readonly(settings_with_fixture_build)
 
     frame = search_titles(connection, "matrix", title_type="movie").df()
 
-    assert frame.loc[0, "Cast"] == "Keanu Reeves"
-    assert frame.loc[0, "Cast IDs"] == "nm0000206"
+    assert "Cast" not in frame.columns
     assert frame.loc[0, "Directors"] == "Lana Wachowski"
-    assert frame.loc[0, "Director IDs"] == "nm0905154"
     assert frame.loc[0, "Writers"] == "Lana Wachowski, Lilly Wachowski"
-    assert frame.loc[0, "Writer IDs"] == "nm0905154, nm0905152"
+
+
+def test_get_title_cast_returns_ordered_principal_credits(
+    settings_with_fixture_build: Settings,
+) -> None:
+    connection = connect_readonly(settings_with_fixture_build)
+
+    frame = get_title_cast(connection, "tt0000001").df()
+
+    assert frame["IMDb Person ID"].tolist() == ["nm0000206", "nm0000401"]
+    assert frame["Name"].tolist() == ["Keanu Reeves", "Carrie-Anne Moss"]
+    assert frame["Role"].tolist() == ["actor", "actress"]
+    assert frame["Characters"].tolist() == ["Neo", "Trinity"]
+
+
+def test_get_title_cast_falls_back_to_person_id(
+    settings_with_fixture_build: Settings,
+) -> None:
+    connection = connect_readonly(settings_with_fixture_build)
+
+    frame = get_title_cast(connection, "tt0000002").df()
+
+    assert frame.loc[0, "Name"] == "nm-missing"
+
+
+def test_get_title_cast_returns_empty_relation_for_unknown_title(
+    settings_with_fixture_build: Settings,
+) -> None:
+    connection = connect_readonly(settings_with_fixture_build)
+
+    assert get_title_cast(connection, "tt-unknown").df().empty
 
 
 def test_search_titles_empty_query_returns_top_by_votes(

@@ -31,7 +31,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install locked dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra app
 
       - name: Check formatting
         run: uv run ruff format --check .

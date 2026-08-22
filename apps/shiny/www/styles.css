@@ -47,6 +47,9 @@ body {
 table.dataTable tbody tr:hover {
     background-color: #f8f9fa !important;
 }
+.cast-button {
+    white-space: nowrap;
+}
 
 .dt-paging .dt-paging-button {
     color: #000 !important;

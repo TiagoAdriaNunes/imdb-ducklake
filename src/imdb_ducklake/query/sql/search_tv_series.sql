@@ -10,11 +10,7 @@ select
     titles.num_votes as "Votes",
     array_to_string(titles.genres, ', ') as "Genres",
     array_to_string(titles.directors, ', ') as "Directors",
-    array_to_string(titles.director_ids, ', ') as "Director IDs",
-    array_to_string(titles.writers, ', ') as "Writers",
-    array_to_string(titles.writer_ids, ', ') as "Writer IDs",
-    array_to_string(titles.principal_cast, ', ') as "Cast",
-    array_to_string(titles.principal_cast_ids, ', ') as "Cast IDs"
+    array_to_string(titles.writers, ', ') as "Writers"
 from marts.mart_title_search as titles
 where
     titles.title_type = 'tvSeries'

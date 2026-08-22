@@ -7,6 +7,12 @@ SHELL := C:/Program Files/Git/bin/bash.exe
 endif
 
 GH_PAGES_DIR := ../imdb-ducklake-gh-pages
+REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+DBT_ENV := \
+	IMDB_DUCKLAKE_DBT_CONTROLLER="$(REPO_ROOT)/data/.dbt/controller.duckdb" \
+	IMDB_DUCKLAKE_DUCKDB_TEMP_DIRECTORY="$(REPO_ROOT)/data/.dbt/tmp" \
+	IMDB_DUCKLAKE_CATALOG="$(REPO_ROOT)/data/ducklake/current/catalog.duckdb" \
+	IMDB_DUCKLAKE_STORAGE="$(REPO_ROOT)/data/ducklake/current/storage"
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
@@ -68,10 +74,10 @@ typecheck:
 	uv run mypy src
 
 dbt-parse:
-	uv run dbt parse --project-dir dbt --profiles-dir dbt --no-partial-parse
+	$(DBT_ENV) uv run dbt parse --project-dir dbt --profiles-dir dbt --no-partial-parse
 
 docs:
-	uv run dbt docs generate --project-dir dbt --profiles-dir dbt
+	$(DBT_ENV) uv run dbt docs generate --project-dir dbt --profiles-dir dbt
 
 publish-docs: docs
 	@if [ ! -e "$(GH_PAGES_DIR)/.git" ]; then \

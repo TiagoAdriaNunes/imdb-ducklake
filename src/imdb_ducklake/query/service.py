@@ -26,6 +26,7 @@ _TITLE_TEMPLATES = {
     ("tvSeries", True): Template((_SQL_DIR / "search_tv_series.sql").read_text(encoding="utf-8")),
     ("tvSeries", False): Template((_SQL_DIR / "top_tv_series.sql").read_text(encoding="utf-8")),
 }
+_TITLE_CAST_SQL = (_SQL_DIR / "title_cast.sql").read_text(encoding="utf-8")
 
 
 def attach_sql(catalog_path: Path, storage_dir: Path) -> str:
@@ -65,3 +66,11 @@ def search_titles(
         raise ValueError("limit must be at least 1")
     sql = _TITLE_TEMPLATES[(title_type, bool(query.strip()))].render(query=query, limit=limit)
     return connection.sql(sql)
+
+
+def get_title_cast(
+    connection: duckdb.DuckDBPyConnection,
+    tconst: str,
+) -> duckdb.DuckDBPyRelation:
+    """Return one ordered row per principal cast credit for a title."""
+    return connection.sql(_TITLE_CAST_SQL, params={"tconst": tconst})

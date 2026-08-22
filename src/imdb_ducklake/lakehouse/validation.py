@@ -55,7 +55,6 @@ REQUIRED_RELATIONS: dict[str, frozenset[str]] = {
             "fct_title_ratings",
             "int_title_director_lists",
             "int_title_genre_lists",
-            "int_title_principal_cast_lists",
         }
     ),
     "marts": frozenset(
@@ -209,7 +208,7 @@ def _validate_read_only(catalog_path: Path, storage_dir: Path, build_id: str) ->
                 mart_row_counts[relation] = int(count_row[0])
             representative_queries = (
                 """
-                select tconst, primary_title, average_rating, genres, directors, principal_cast
+                select tconst, primary_title, average_rating, genres, directors
                 from imdb_lake.marts.mart_title_search limit 1
                 """,
                 """

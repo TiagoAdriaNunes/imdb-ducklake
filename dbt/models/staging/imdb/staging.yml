@@ -79,7 +79,7 @@ models:
       - {name: sha256, description: Verified archive digest., data_tests: [not_null]}
       - {name: downloaded_at, description: UTC acquisition timestamp.}
       - {name: batch_id, description: Acquisition batch identifier., data_tests: [not_null]}
-      - {name: etag, description: Source HTTP ETag, when available.}
-      - {name: last_modified, description: Source HTTP Last-Modified, when available.}
-      - {name: content_type, description: Source HTTP Content-Type, when available.}
+      - {name: etag, description: "Source HTTP ETag, when available."}
+      - {name: last_modified, description: "Source HTTP Last-Modified, when available."}
+      - {name: content_type, description: "Source HTTP Content-Type, when available."}
       - {name: dlt_load_id, description: dlt load identifier., data_tests: [not_null]}

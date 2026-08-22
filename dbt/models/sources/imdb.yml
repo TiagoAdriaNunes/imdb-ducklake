@@ -24,11 +24,11 @@ sources:
           - {name: tconst, description: Alphanumeric unique identifier of the title.}
           - {name: titleType, description: "The type/format of the title, e.g. movie, short, tvSeries, tvEpisode, video."}
           - {name: primaryTitle, description: "The more popular title, or the title used by the filmmakers on promotional materials at the point of release."}
-          - {name: originalTitle, description: Original title, in the original language.}
+          - {name: originalTitle, description: "Original title, in the original language."}
           - {name: isAdult, description: "Raw flag: 0 = non-adult title, 1 = adult title."}
           - {name: startYear, description: "Release year (YYYY); for TV series, the series start year."}
           - {name: endYear, description: "TV series end year (YYYY); '\\N' for all other title types."}
-          - {name: runtimeMinutes, description: Primary runtime of the title, in minutes.}
+          - {name: runtimeMinutes, description: "Primary runtime of the title, in minutes."}
           - {name: genres, description: Comma-delimited list of up to three genres associated with the title.}
           - {name: _dlt_load_id, description: dlt load lineage identifier.}
       - name: title_crew

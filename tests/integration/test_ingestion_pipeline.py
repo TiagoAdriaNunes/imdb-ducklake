@@ -181,7 +181,7 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
             "SELECT characters FROM imdb_lake.staging.stg_imdb__title_principals"
         ).fetchone()[0] == ["Hero"]
         title_search = connection.execute(
-            "SELECT primary_title, average_rating, genres, directors, principal_cast "
+            "SELECT primary_title, average_rating, genres, directors "
             "FROM imdb_lake.marts.mart_title_search WHERE tconst = 'tt0001'"
         ).fetchone()
         assert title_search == (
@@ -189,17 +189,27 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
             7.5,
             ["Drama"],
             ["Example Person"],
-            ["Example Person"],
         )
         assert connection.execute(
             "SELECT title_count, rated_title_count, total_votes "
             "FROM imdb_lake.marts.mart_genre_year_summary "
             "WHERE start_year = 2020 AND genre = 'Drama'"
         ).fetchone() == (1, 1, 100)
-        assert connection.execute(
+        person_filmography_sql = (
             "SELECT nconst, tconst, category, characters "
-            "FROM imdb_lake.marts.mart_person_filmography"
-        ).fetchone() == ("nm0001", "tt0001", "actor", ["Hero"])
+            "FROM imdb_lake.marts.mart_person_filmography "
+            "WHERE category = 'actor'"
+        )
+        assert connection.execute(person_filmography_sql).fetchone() == (
+            "nm0001",
+            "tt0001",
+            "actor",
+            ["Hero"],
+        )
+        assert connection.execute(
+            "SELECT category FROM imdb_lake.marts.mart_person_filmography "
+            "WHERE nconst = 'nm0001' AND tconst = 'tt0001' ORDER BY category"
+        ).fetchall() == [("actor",), ("director",), ("writer",)]
         assert connection.execute(
             "SELECT series_tconst, episode_tconst, season_number, episode_number "
             "FROM imdb_lake.marts.mart_series_episodes"
@@ -235,7 +245,7 @@ def test_one_command_builds_validates_and_promotes_fixture_snapshot(tmp_path) ->
     )
 
     assert result.promoted.current_dir == settings.current_dir
-    assert result.validation.relation_count == 31
+    assert result.validation.relation_count == 30
     assert result.validation.mart_row_counts["mart_title_search"] == 2
     assert result.promoted.previous_dir is not None
     assert (result.promoted.previous_dir / "previous.txt").read_text(encoding="utf-8") == (

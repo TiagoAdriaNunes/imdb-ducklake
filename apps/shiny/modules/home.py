@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import html
+import json
 import re
 
 import pandas as pd
 from itables.shiny import DT
-from shiny import module, render, ui
+from shiny import module, reactive, render, ui
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
-from imdb_ducklake.query.service import connect_readonly, search_titles
+from imdb_ducklake.query.service import connect_readonly, get_title_cast, search_titles
 
-_WRAP_COLUMNS = ("Directors", "Writers", "Cast")
+_WRAP_COLUMNS = ("Directors", "Writers")
 _WRAP_WIDTH_PX = 320
 _WRAP_STYLE = (
     f"display:inline-block;max-width:{_WRAP_WIDTH_PX}px;white-space:normal;word-break:break-word;"
 )
 _NARROW_COLUMNS = ("IMDb ID", "Rating", "Votes")
 _NARROW_WIDTH_PX = 70
+_ACTION_WIDTH_PX = 110
 
 
 def _title_cell(primary: str, original: str) -> str:
@@ -40,6 +42,17 @@ def _year_cell(start: object) -> str:
     if pd.isna(start):
         return ""
     return str(int(start))
+
+
+def _cast_button(tconst: object, input_id: str) -> str:
+    javascript = (
+        f"Shiny.setInputValue({json.dumps(input_id)}, {json.dumps(str(tconst))}, "
+        "{priority: 'event'})"
+    )
+    return (
+        '<button type="button" class="btn btn-sm btn-outline-dark cast-button" '
+        f'onclick="{html.escape(javascript, quote=True)}">Display cast</button>'
+    )
 
 
 @module.ui
@@ -75,6 +88,44 @@ def titles_server(
     except NoPromotedBuildError as error:
         startup_error = str(error)
 
+    @reactive.effect
+    @reactive.event(input.cast_title)
+    def show_cast():
+        if startup_error is not None or connection is None:
+            return
+        tconst = input.cast_title()
+        frame = get_title_cast(connection, tconst).df()
+        if frame.empty:
+            ui.modal_show(
+                ui.modal(
+                    ui.p(f"No principal cast is available for {tconst}."),
+                    title="Cast",
+                    easy_close=True,
+                )
+            )
+            return
+
+        title = str(frame.pop("Title").iloc[0])
+        frame["Characters"] = frame["Characters"].fillna("")
+        frame["Role"] = frame["Role"].map(lambda value: str(value).capitalize())
+        ui.modal_show(
+            ui.modal(
+                ui.HTML(
+                    DT(
+                        frame,
+                        pageLength=10,
+                        lengthMenu=[10, 25, 50],
+                        style="width:100%;margin:0",
+                        maxBytes=0,
+                        autoWidth=False,
+                    )
+                ),
+                title=f"Cast — {title}",
+                easy_close=True,
+                size="l",
+            )
+        )
+
     @output
     @render.ui
     def results():
@@ -100,6 +151,9 @@ def titles_server(
             year_columns = ["Year"]
         runtime_column = "Episode runtime (min)" if show_end_year else "Runtime (min)"
         frame = frame.rename(columns={"Runtime (min)": runtime_column})
+        frame["Cast"] = frame["IMDb ID"].map(
+            lambda tconst: _cast_button(tconst, session.ns("cast_title"))
+        )
         columns_to_drop = ["Primary Title", "Original Title", "Type"]
         if not show_end_year:
             columns_to_drop.extend(["Start Year", "End Year"])
@@ -133,6 +187,11 @@ def titles_server(
             {
                 "targets": [frame.columns.get_loc(c) for c in _WRAP_COLUMNS],
                 "width": f"{_WRAP_WIDTH_PX}px",
+            },
+            {
+                "targets": [frame.columns.get_loc("Cast")],
+                "width": f"{_ACTION_WIDTH_PX}px",
+                "orderable": False,
             },
         ]
         return ui.HTML(
