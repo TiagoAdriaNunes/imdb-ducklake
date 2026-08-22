@@ -13,5 +13,8 @@ select
     array_to_string(principal_cast, ', ') as "Cast"
 from marts.mart_title_search
 where primary_title ilike '%' || ? || '%'
-order by num_votes desc nulls last
+    and num_votes >= 50000
+    and title_type in ('movie', 'tvSeries')
+    and (?::varchar[] is null or title_type = any(?::varchar[]))
+order by average_rating desc nulls last, num_votes desc nulls last
 limit ?
