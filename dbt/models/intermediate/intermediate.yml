@@ -128,7 +128,7 @@ models:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - {name: genres, description: Sorted genre array., data_tests: [not_null]}
   - name: int_title_director_lists
-    description: One persisted director-name array per title.
+    description: One persisted director name and IMDb identifier array per title.
     columns:
       - name: tconst
         description: Title key.
@@ -137,7 +137,20 @@ models:
           - unique
           - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
-      - {name: directors, description: Sorted distinct director-name array., data_tests: [not_null]}
+      - {name: directors, description: Director-name array ordered consistently with director_ids., data_tests: [not_null]}
+      - {name: director_ids, description: Director IMDb person identifier array aligned with directors., data_tests: [not_null]}
+  - name: int_title_writer_lists
+    description: One persisted writer name and IMDb identifier array per title.
+    columns:
+      - name: tconst
+        description: Title key.
+        data_tests:
+          - not_null
+          - unique
+          - relationships_with_max_orphan_ratio:
+              arguments: {to: "ref('dim_titles')", field: tconst}
+      - {name: writers, description: Writer-name array ordered consistently with writer_ids., data_tests: [not_null]}
+      - {name: writer_ids, description: Writer IMDb person identifier array aligned with writers., data_tests: [not_null]}
   - name: int_title_principal_cast_lists
     description: One persisted, ordered principal-cast name and IMDb identifier array per title.
     columns:

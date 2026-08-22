@@ -13,7 +13,7 @@ from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
 from imdb_ducklake.query.service import connect_readonly, search_titles
 
-_WRAP_COLUMNS = ("Directors", "Cast")
+_WRAP_COLUMNS = ("Directors", "Writers", "Cast")
 _WRAP_WIDTH_PX = 320
 _WRAP_STYLE = (
     f"display:inline-block;max-width:{_WRAP_WIDTH_PX}px;white-space:normal;word-break:break-word;"
@@ -115,6 +115,7 @@ def titles_server(
         if show_end_year:
             result_columns.append("Episodes")
         result_columns.extend(["Rating", "Votes", "Genres", "Directors", "Cast"])
+        result_columns.insert(result_columns.index("Cast"), "Writers")
         frame = frame[result_columns]
         for column in _WRAP_COLUMNS:
             frame[column] = frame[column].map(
