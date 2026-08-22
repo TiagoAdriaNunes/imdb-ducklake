@@ -7,10 +7,22 @@ SHELL := C:/Program Files/Git/bin/bash.exe
 endif
 
 GH_PAGES_DIR := ../imdb-ducklake-gh-pages
+REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+DBT_ENV := \
+	IMDB_DUCKLAKE_DBT_CONTROLLER="$(REPO_ROOT)/data/.dbt/controller.duckdb" \
+	IMDB_DUCKLAKE_CATALOG="$(REPO_ROOT)/data/ducklake/current/catalog.duckdb" \
+	IMDB_DUCKLAKE_STORAGE="$(REPO_ROOT)/data/ducklake/current/storage"
+
+# LOG_FORMAT=json (add to any pipeline target below) sets IMDB_LAKEHOUSE_LOG_FORMAT for that run,
+# e.g. `make build LOG_FORMAT=json`. The CLI's own --log-format flag is a global option that must
+# precede the subcommand, so it cannot be passed through ARGS (which is appended after it).
+ifdef LOG_FORMAT
+PIPELINE_ENV := IMDB_LAKEHOUSE_LOG_FORMAT=$(LOG_FORMAT)
+endif
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
-	shell-ui clean-dlt-pipelines
+	shell-ui clean-dlt-pipelines upload-bucket
 
 help:
 	@echo "Setup"
@@ -36,7 +48,7 @@ help:
 	@echo "  make docs            dbt docs generate (against whatever catalog is configured)"
 	@echo "  make publish-docs    generate + stage docs on the gh-pages branch (review, then push)"
 	@echo ""
-	@echo "Lakehouse pipeline (imdb-lakehouse CLI)"
+	@echo "Lakehouse pipeline (imdb-lakehouse CLI; add LOG_FORMAT=json to any of these for JSON logs)"
 	@echo "  make download        download and verify all seven IMDb archives"
 	@echo "  make ingest          load retained archives into an isolated raw build"
 	@echo "  make transform       run dbt build against the staged build"
@@ -47,6 +59,7 @@ help:
 	@echo "  make shell           interactive SQL shell read-only attached to the current build"
 	@echo "  make shell-ui        same, and opens DuckDB's local web UI in your browser"
 	@echo "  make clean-dlt-pipelines  delete old dlt working dirs, keep the newest KEEP=3"
+	@echo "  make upload-bucket   hf sync data/ducklake/current to \$$HF_BUCKET (required, e.g. hf://buckets/<you>/<name>)"
 
 sync:
 	uv sync --locked
@@ -67,10 +80,10 @@ typecheck:
 	uv run mypy src
 
 dbt-parse:
-	uv run dbt parse --project-dir dbt --profiles-dir dbt --no-partial-parse
+	$(DBT_ENV) uv run dbt parse --project-dir dbt --profiles-dir dbt --no-partial-parse
 
 docs:
-	uv run dbt docs generate --project-dir dbt --profiles-dir dbt
+	$(DBT_ENV) uv run dbt docs generate --project-dir dbt --profiles-dir dbt
 
 publish-docs: docs
 	@if [ ! -e "$(GH_PAGES_DIR)/.git" ]; then \
@@ -103,25 +116,25 @@ shell-ui:
 	uv run python scripts/duckdb_shell.py --ui
 
 download:
-	uv run imdb-lakehouse download $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse download $(ARGS)
 
 ingest:
-	uv run imdb-lakehouse ingest $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse ingest $(ARGS)
 
 transform:
-	uv run imdb-lakehouse transform $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse transform $(ARGS)
 
 build:
-	uv run imdb-lakehouse build $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse build $(ARGS)
 
 validate:
-	uv run imdb-lakehouse validate $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse validate $(ARGS)
 
 promote:
-	uv run imdb-lakehouse promote $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse promote $(ARGS)
 
 checkpoint:
-	uv run imdb-lakehouse checkpoint $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse checkpoint $(ARGS)
 
 KEEP ?= 3
 clean-dlt-pipelines:
@@ -131,3 +144,7 @@ clean-dlt-pipelines:
 	echo "$$victims"; \
 	if [ "$(DRY)" = "1" ]; then echo "(dry run, nothing deleted; rerun without DRY=1)"; exit 0; fi; \
 	echo "$$victims" | xargs -r rm -rf --
+
+upload-bucket:
+	@test -n "$(HF_BUCKET)" || { echo "set HF_BUCKET, e.g. HF_BUCKET=hf://buckets/<you>/<name> make upload-bucket"; exit 1; }
+	hf sync ./data/ducklake/current $(HF_BUCKET) $(ARGS)

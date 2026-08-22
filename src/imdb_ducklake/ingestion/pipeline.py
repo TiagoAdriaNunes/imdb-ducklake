@@ -102,7 +102,8 @@ def ingest_snapshot(
         )
         with dlt.config.values(
             {
-                "load.workers": 1,
+                "extract.workers": 2,
+                "load.workers": 2,
                 "normalize.workers": 2,
                 "normalize.parquet_normalizer.add_dlt_load_id": True,
             }

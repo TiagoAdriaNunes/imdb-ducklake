@@ -6,8 +6,8 @@ select
         list(people.primary_name order by people.primary_name)
         filter (where people.primary_name is not null),
         []
-    ) as directors
+    ) as writers
 from {{ ref('bridge_title_crew') }} as crew
 left join {{ ref('dim_people') }} as people using (nconst)
-where crew.crew_role = 'director'
+where crew.crew_role = 'writer'
 group by crew.tconst

@@ -1,6 +1,6 @@
 [project]
 name = "imdb-ducklake"
-version = "0.4.1"
+version = "0.5.0"
 description = "A reproducible IMDb analytics lakehouse built with dlt, DuckLake, dbt, and DuckDB."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -10,9 +10,18 @@ dependencies = [
     "dlt[ducklake]>=1.29,<2",
     "duckdb>=1.4,<2",
     "httpx>=0.28,<1",
+    "jinja2>=3.1,<4",
     "loguru>=0.7,<1",
     "rich>=14,<16",
     "typer>=0.16,<1",
+]
+
+[project.optional-dependencies]
+app = [
+    "great-tables>=0.17,<1",
+    "itables>=2.7,<3",
+    "pandas>=2,<3",
+    "shiny>=1.4,<2",
 ]
 
 [project.scripts]
@@ -25,6 +34,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "mypy>=1.17,<2",
+    "pre-commit>=4.6.2",
     "pytest>=8.4,<9",
     "pytest-cov>=6.2,<8",
     "respx>=0.22,<1",

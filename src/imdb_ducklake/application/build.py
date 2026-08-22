@@ -26,11 +26,12 @@ from imdb_ducklake.lakehouse.lifecycle import (
     PromotedBuild,
     SpaceBudget,
     checkpoint_lakehouse,
+    cleanup_build,
     ensure_free_space,
+    initialize_build,
     promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
-    temporary_build,
 )
 from imdb_ducklake.lakehouse.validation import ValidationResult, validate_build
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult, run_dbt
@@ -140,13 +141,14 @@ def build_lakehouse(
                 count=len(removed),
             )
 
-        with temporary_build(paths):
-            build_logger.info(
-                "Ingestion started",
-                event_code="ingestion_started",
-                stage="ingestion",
-                status="started",
-            )
+        initialize_build(paths)
+        build_logger.info(
+            "Ingestion started",
+            event_code="ingestion_started",
+            stage="ingestion",
+            status="started",
+        )
+        try:
             ingestion = ingest_snapshot(
                 artifacts,
                 build_paths=paths,
@@ -162,7 +164,18 @@ def build_lakehouse(
                     else None
                 ),
             )
+        except BaseException:
+            # An incomplete or failed raw load cannot be safely resumed, so this is the one
+            # stage that still discards the build workspace on failure.
+            cleanup_build(paths)
+            raise
 
+        # From here on, ingestion has already produced a valid raw build. A later failure
+        # (dbt/validate/promote) must not delete it: retrying acquisition and ingestion just to
+        # re-test a dbt fix can cost several minutes for no reason when the raw archives never
+        # changed. Leave the build staged under data/ducklake/builds/ so `make transform` or
+        # `make promote --build-id ...` can resume it directly.
+        try:
             build_logger.info(
                 "dbt build started",
                 event_code="dbt_build_started",
@@ -229,6 +242,16 @@ def build_lakehouse(
                 stage="checkpoint",
                 status="completed",
             )
+        except BaseException:
+            build_logger.error(
+                "Build stage failed after ingestion; raw build preserved for retry",
+                event_code="post_ingestion_stage_failed",
+                stage="build",
+                status="failed",
+                build_id=paths.build_id,
+                catalog=str(paths.catalog_path),
+            )
+            raise
 
     build_logger.info(
         "Lakehouse build completed",

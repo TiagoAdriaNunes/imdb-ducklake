@@ -2,7 +2,7 @@ version: 2
 
 models:
   - name: mart_title_search
-    description: One search-ready row per title with ratings, genres, directors, and principal cast, grain tconst.
+    description: One search-ready row per title with ratings, genres, directors, and writers, grain tconst.
     config:
       contract: {enforced: true}
     columns:
@@ -13,12 +13,13 @@ models:
       - {name: is_adult, data_type: boolean, description: Adult-content flag.}
       - {name: start_year, data_type: smallint, description: Release start year; TV series start year for series.}
       - {name: end_year, data_type: smallint, description: TV series end year; null for all other title types.}
-      - {name: runtime_minutes, data_type: integer, description: Primary runtime, in minutes.}
+      - {name: runtime_minutes, data_type: integer, description: "Primary runtime, in minutes."}
+      - {name: episode_count, data_type: bigint, description: Number of episodes linked to a TV series; null for non-series titles.}
       - {name: average_rating, data_type: double, description: Average rating measure.}
       - {name: num_votes, data_type: bigint, description: Vote-count measure.}
       - {name: genres, data_type: "varchar[]", description: Genre array.}
       - {name: directors, data_type: "varchar[]", description: Director name array.}
-      - {name: principal_cast, data_type: "varchar[]", description: Principal cast name array.}
+      - {name: writers, data_type: "varchar[]", description: Writer name array.}
       - {name: dlt_load_id, data_type: varchar, description: Raw title lineage., data_tests: [not_null]}
   - name: mart_genre_year_summary
     description: Title, rating, and vote summaries by year, title type, and genre, grain (start_year, title_type, genre).
@@ -33,7 +34,7 @@ models:
       - {name: average_rating, data_type: double, description: Mean rating of rated titles.}
       - {name: total_votes, data_type: hugeint, description: Sum of title vote counts., data_tests: [not_null]}
   - name: mart_person_filmography
-    description: Searchable ordered people-to-title credits with role and rating details, grain (nconst, tconst, ordering).
+    description: Searchable people-to-title credits for cast, directors, and writers with role and rating details, grain (nconst, tconst, category, ordering).
     config:
       contract: {enforced: true}
     columns:
@@ -43,10 +44,10 @@ models:
       - {name: primary_title, data_type: varchar, description: Credited title text.}
       - {name: title_type, data_type: varchar, description: Credited title's IMDb title type.}
       - {name: start_year, data_type: smallint, description: Credited title's release start year.}
-      - {name: ordering, data_type: integer, description: Credit ordering., data_tests: [not_null]}
-      - {name: category, data_type: varchar, description: Credit category.}
-      - {name: job, data_type: varchar, description: Specific job title, if applicable.}
-      - {name: characters, data_type: "varchar[]", description: Character name array, if applicable.}
+      - {name: ordering, data_type: integer, description: IMDb principal-credit ordering; null for director and writer credits.}
+      - {name: category, data_type: varchar, description: "Credit role, including principal categories, director, and writer."}
+      - {name: job, data_type: varchar, description: "Specific job title, if applicable."}
+      - {name: characters, data_type: "varchar[]", description: "Character name array, if applicable."}
       - {name: average_rating, data_type: double, description: Optional title rating.}
       - {name: num_votes, data_type: bigint, description: Optional title vote count.}
       - {name: dlt_load_id, data_type: varchar, description: Raw credit lineage., data_tests: [not_null]}

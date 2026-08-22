@@ -38,6 +38,7 @@ ALLOWED_DEPENDENCIES = {
     "ingestion": {"acquisition", "datasets", "exceptions", "ingestion", "lakehouse"},
     "lakehouse": {"exceptions", "lakehouse"},
     "observability": set(),
+    "query": {"config", "exceptions"},
     "transformation": {"exceptions", "lakehouse", "transformation"},
 }
 

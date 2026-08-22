@@ -25,6 +25,10 @@ class ValidationError(ImdbLakehouseError):
     """Raised when the resulting lakehouse fails an acceptance check."""
 
 
+class NoPromotedBuildError(ImdbLakehouseError):
+    """Raised when no promoted build exists at Settings.current_dir."""
+
+
 class LifecycleError(ImdbLakehouseError):
     """Raised when build workspace, locking, or disk lifecycle operations fail."""
 

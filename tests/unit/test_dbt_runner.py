@@ -31,12 +31,13 @@ def test_runs_dbt_with_explicit_paths_and_environment(tmp_path) -> None:
         received = command, cwd, environment
         return subprocess.CompletedProcess(command, 0, "dbt succeeded", "")
 
+    controller_path = tmp_path / "state" / "controller.duckdb"
     result = run_dbt(
         ("build", "--select", "staging"),
         build_paths=paths,
         project_dir=project,
         profiles_dir=project,
-        controller_path=tmp_path / "state" / "controller.duckdb",
+        controller_path=controller_path,
         executable="dbt",
         environment={"EXISTING": "value"},
         runner=runner,
@@ -50,6 +51,7 @@ def test_runs_dbt_with_explicit_paths_and_environment(tmp_path) -> None:
     assert environment["EXISTING"] == "value"
     assert environment["IMDB_DUCKLAKE_CATALOG"] == paths.catalog_path.as_posix()
     assert environment["IMDB_DUCKLAKE_STORAGE"] == paths.storage_dir.as_posix()
+    assert environment["IMDB_DUCKLAKE_DBT_CONTROLLER"] == controller_path.resolve().as_posix()
 
 
 def test_rejects_incomplete_build_and_wraps_dbt_failure(tmp_path) -> None:
