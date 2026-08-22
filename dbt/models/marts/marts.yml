@@ -14,6 +14,7 @@ models:
       - {name: start_year, data_type: smallint, description: Release start year; TV series start year for series.}
       - {name: end_year, data_type: smallint, description: TV series end year; null for all other title types.}
       - {name: runtime_minutes, data_type: integer, description: Primary runtime, in minutes.}
+      - {name: episode_count, data_type: bigint, description: Number of episodes linked to a TV series; null for non-series titles.}
       - {name: average_rating, data_type: double, description: Average rating measure.}
       - {name: num_votes, data_type: bigint, description: Vote-count measure.}
       - {name: genres, data_type: "varchar[]", description: Genre array.}

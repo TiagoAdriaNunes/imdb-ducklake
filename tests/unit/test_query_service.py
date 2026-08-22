@@ -32,6 +32,7 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
             start_year integer,
             end_year integer,
             runtime_minutes integer,
+            episode_count bigint,
             average_rating double,
             num_votes bigint,
             genres varchar[],
@@ -41,23 +42,24 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
         )
         """
     )
+    connection.execute("create table marts.mart_series_episodes (series_tconst varchar)")
     connection.execute(
         """
         insert into marts.mart_title_search values
             ('tt0000001', 'movie', 'The Matrix', 'The Matrix', false, 1999, NULL,
-             136, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
+             136, NULL, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
              ['Keanu Reeves'], 'load1'),
             ('tt0000002', 'movie', 'The Matrix Reloaded', 'The Matrix Reloaded', false,
-             2003, NULL, 138, 7.2, 700000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
+             2003, NULL, 138, NULL, 7.2, 700000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
              ['Keanu Reeves'], 'load1'),
             ('tt0000003', 'movie', 'Inception', 'Inception', false, 2010, NULL,
-             148, 8.8, 2300000, ['Action', 'Sci-Fi'], ['Christopher Nolan'],
+             148, NULL, 8.8, 2300000, ['Action', 'Sci-Fi'], ['Christopher Nolan'],
              ['Leonardo DiCaprio'], 'load1'),
             ('tt0000004', 'tvSeries', 'Breaking Bad', 'Breaking Bad', false, 2008, 2013,
-             47, 9.5, 2100000, ['Crime', 'Drama'], ['Vince Gilligan'],
+             47, 62, 9.5, 2100000, ['Crime', 'Drama'], ['Vince Gilligan'],
              ['Bryan Cranston'], 'load1'),
             ('tt0000005', 'short', 'Bao', 'Bao', false, 2018, NULL,
-             8, 8.1, 90000, ['Animation', 'Comedy', 'Drama'], ['Domee Shi'],
+             8, NULL, 8.1, 90000, ['Animation', 'Comedy', 'Drama'], ['Domee Shi'],
              ['Domee Shi'], 'load1')
         """
     )
@@ -91,7 +93,7 @@ def test_connect_readonly_raises_when_no_promoted_build(tmp_path: Path) -> None:
 def test_search_titles_filters_by_query(settings_with_fixture_build: Settings) -> None:
     connection = connect_readonly(settings_with_fixture_build)
 
-    tconsts = _tconsts(search_titles(connection, "matrix"))
+    tconsts = _tconsts(search_titles(connection, "matrix", title_type="movie"))
 
     assert sorted(tconsts) == ["tt0000001", "tt0000002"]
     assert tconsts == ["tt0000001", "tt0000002"]  # ordered by num_votes desc
@@ -102,32 +104,33 @@ def test_search_titles_empty_query_returns_top_by_votes(
 ) -> None:
     connection = connect_readonly(settings_with_fixture_build)
 
-    tconsts = _tconsts(search_titles(connection, ""))
+    tconsts = _tconsts(search_titles(connection, "", title_type="movie"))
 
-    assert tconsts == ["tt0000004", "tt0000003", "tt0000001", "tt0000002"]
+    assert tconsts == ["tt0000003", "tt0000001", "tt0000002"]
 
 
 def test_search_titles_respects_limit(settings_with_fixture_build: Settings) -> None:
     connection = connect_readonly(settings_with_fixture_build)
 
-    tconsts = _tconsts(search_titles(connection, "", limit=1))
+    tconsts = _tconsts(search_titles(connection, "", title_type="movie", limit=1))
 
-    assert tconsts == ["tt0000004"]
+    assert tconsts == ["tt0000003"]
 
 
-def test_search_titles_filters_by_type(settings_with_fixture_build: Settings) -> None:
+def test_search_titles_returns_tv_series(settings_with_fixture_build: Settings) -> None:
     connection = connect_readonly(settings_with_fixture_build)
 
-    tconsts = _tconsts(search_titles(connection, "", title_types=["tvSeries"]))
+    tconsts = _tconsts(search_titles(connection, "", title_type="tvSeries"))
 
     assert tconsts == ["tt0000004"]
 
 
-def test_search_titles_excludes_non_movie_series_types(
+def test_search_titles_excludes_non_selected_title_types(
     settings_with_fixture_build: Settings,
 ) -> None:
     connection = connect_readonly(settings_with_fixture_build)
 
-    tconsts = _tconsts(search_titles(connection, ""))
+    tconsts = _tconsts(search_titles(connection, "", title_type="movie"))
 
+    assert "tt0000004" not in tconsts
     assert "tt0000005" not in tconsts

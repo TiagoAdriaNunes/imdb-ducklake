@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from importlib import resources
 from pathlib import Path
+from typing import Literal
 
 import duckdb
 from jinja2 import Template
@@ -19,8 +20,12 @@ def _sql_string(value: str) -> str:
 
 
 _SQL_DIR = resources.files("imdb_ducklake.query") / "sql"
-_SEARCH_TITLES_TEMPLATE = Template((_SQL_DIR / "search_titles.sql").read_text(encoding="utf-8"))
-_TOP_TITLES_TEMPLATE = Template((_SQL_DIR / "top_titles.sql").read_text(encoding="utf-8"))
+_TITLE_TEMPLATES = {
+    ("movie", True): Template((_SQL_DIR / "search_movie_titles.sql").read_text(encoding="utf-8")),
+    ("movie", False): Template((_SQL_DIR / "top_movie_titles.sql").read_text(encoding="utf-8")),
+    ("tvSeries", True): Template((_SQL_DIR / "search_tv_series.sql").read_text(encoding="utf-8")),
+    ("tvSeries", False): Template((_SQL_DIR / "top_tv_series.sql").read_text(encoding="utf-8")),
+}
 
 
 def attach_sql(catalog_path: Path, storage_dir: Path) -> str:
@@ -52,18 +57,11 @@ def connect_readonly(settings: Settings) -> duckdb.DuckDBPyConnection:
 def search_titles(
     connection: duckdb.DuckDBPyConnection,
     query: str,
-    title_types: list[str] | None = None,
+    title_type: Literal["movie", "tvSeries"],
     limit: int = 50,
 ) -> duckdb.DuckDBPyRelation:
-    """Search mart_title_search by title substring and optional type filter."""
+    """Search or rank one application title type from mart_title_search."""
     if limit < 1:
         raise ValueError("limit must be at least 1")
-    if query.strip():
-        sql = _SEARCH_TITLES_TEMPLATE.render(
-            query=query,
-            title_types=title_types,
-            limit=limit,
-        )
-        return connection.sql(sql)
-    sql = _TOP_TITLES_TEMPLATE.render(title_types=title_types, limit=limit)
+    sql = _TITLE_TEMPLATES[(title_type, bool(query.strip()))].render(query=query, limit=limit)
     return connection.sql(sql)
