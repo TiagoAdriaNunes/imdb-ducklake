@@ -8,7 +8,10 @@ union all
 select 'dim_people'
 where
     (select count(*) from {{ ref('dim_people') }})
-    != (select count(*) from {{ ref('stg_imdb__name_basics') }})
+    != (
+        select count(*) from {{ ref('stg_imdb__name_basics') }}
+        where primary_name is not null
+    )
 
 union all
 

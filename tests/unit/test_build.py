@@ -184,4 +184,16 @@ def test_every_stage_failure_preserves_current_build(stage, tmp_path, monkeypatc
         )
 
     assert marker.read_text(encoding="utf-8") == "known-good"
-    assert not list((settings.lakehouse_dir / "builds").glob("*"))
+
+    staged_builds = list((settings.lakehouse_dir / "builds").glob("*"))
+    if stage in ("acquisition", "ingestion"):
+        # An incomplete or failed raw load cannot be safely resumed, so these stages still
+        # discard the whole build workspace.
+        assert not staged_builds
+    else:
+        # A later failure must not discard the already-ingested raw build: retrying acquisition
+        # and ingestion just to re-test a dbt/validation/promotion fix wastes real time when the
+        # raw archives never changed. `make transform`/`make promote` can resume it directly.
+        assert len(staged_builds) == 1
+        assert (staged_builds[0] / "catalog.duckdb").read_text(encoding="utf-8") == "catalog"
+        assert (staged_builds[0] / "storage" / "rows.parquet").read_text(encoding="utf-8") == "rows"
