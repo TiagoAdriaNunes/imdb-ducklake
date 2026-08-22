@@ -139,7 +139,7 @@ models:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - {name: directors, description: Sorted distinct director-name array., data_tests: [not_null]}
   - name: int_title_principal_cast_lists
-    description: One persisted principal-cast-name array per title.
+    description: One persisted, ordered principal-cast name and IMDb identifier array per title.
     columns:
       - name: tconst
         description: Title key.
@@ -148,4 +148,5 @@ models:
           - unique
           - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
-      - {name: principal_cast, description: Sorted distinct principal-cast-name array., data_tests: [not_null]}
+      - {name: principal_cast, description: Principal-cast name array in IMDb credit order., data_tests: [not_null]}
+      - {name: principal_cast_ids, description: Principal-cast IMDb person identifier array aligned with principal_cast., data_tests: [not_null]}

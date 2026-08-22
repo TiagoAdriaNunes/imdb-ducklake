@@ -20,6 +20,7 @@ models:
       - {name: genres, data_type: "varchar[]", description: Genre array.}
       - {name: directors, data_type: "varchar[]", description: Director name array.}
       - {name: principal_cast, data_type: "varchar[]", description: Principal cast name array.}
+      - {name: principal_cast_ids, data_type: "varchar[]", description: Principal cast IMDb person identifier array aligned with principal_cast.}
       - {name: dlt_load_id, data_type: varchar, description: Raw title lineage., data_tests: [not_null]}
   - name: mart_genre_year_summary
     description: Title, rating, and vote summaries by year, title type, and genre, grain (start_year, title_type, genre).

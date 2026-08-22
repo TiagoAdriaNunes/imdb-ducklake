@@ -7,7 +7,7 @@ imdb_ducklake:
       schema: main
       threads: 1
       settings:
-        threads: 2
+        threads: 4
         preserve_insertion_order: false
       extensions:
         - ducklake
