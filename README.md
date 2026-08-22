@@ -52,6 +52,8 @@ compiled SQL) are published at
 
 ```console
 uv sync --locked
+uv run pre-commit install
+uv run pre-commit run --all-files
 uv run imdb-lakehouse --help
 uv run ruff check .
 uv run pytest
