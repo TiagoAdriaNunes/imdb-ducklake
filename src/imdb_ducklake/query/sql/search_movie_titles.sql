@@ -8,6 +8,9 @@ select
     num_votes as "Votes",
     array_to_string(genres, ', ') as "Genres",
     array_to_string(directors, ', ') as "Directors",
+    array_to_string(director_ids, ', ') as "Director IDs",
+    array_to_string(writers, ', ') as "Writers",
+    array_to_string(writer_ids, ', ') as "Writer IDs",
     array_to_string(principal_cast, ', ') as "Cast",
     array_to_string(principal_cast_ids, ', ') as "Cast IDs"
 from marts.mart_title_search

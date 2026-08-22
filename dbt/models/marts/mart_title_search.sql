@@ -20,6 +20,9 @@ select
     ratings.num_votes,
     genres.genres,
     directors.directors,
+    directors.director_ids,
+    writers.writers,
+    writers.writer_ids,
     principals.principal_cast,
     principals.principal_cast_ids,
     titles.dlt_load_id
@@ -28,4 +31,5 @@ left join episode_counts using (tconst)
 left join {{ ref('fct_title_ratings') }} as ratings using (tconst)
 left join {{ ref('int_title_genre_lists') }} as genres using (tconst)
 left join {{ ref('int_title_director_lists') }} as directors using (tconst)
+left join {{ ref('int_title_writer_lists') }} as writers using (tconst)
 left join {{ ref('int_title_principal_cast_lists') }} as principals using (tconst)
