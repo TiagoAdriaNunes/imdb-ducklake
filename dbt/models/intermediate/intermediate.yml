@@ -5,22 +5,22 @@ models:
     description: One canonical typed row per IMDb title, grain tconst.
     columns:
       - {name: tconst, description: Title dimension key., data_tests: [not_null, unique]}
-      - {name: title_type, description: IMDb title type, e.g. movie, short, tvSeries, tvEpisode.}
+      - {name: title_type, description: "IMDb title type, e.g. movie, short, tvSeries, tvEpisode."}
       - {name: primary_title, description: Primary display title.}
       - {name: original_title, description: Original title text.}
       - {name: is_adult, description: Adult-content flag.}
       - {name: start_year, description: Release start year; TV series start year for series.}
       - {name: end_year, description: TV series end year; null for all other title types.}
-      - {name: runtime_minutes, description: Primary runtime, in minutes.}
+      - {name: runtime_minutes, description: "Primary runtime, in minutes."}
       - {name: genres, description: Genre array.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: dim_people
-    description: One canonical typed row per IMDb person, grain nconst.
+    description: One canonical typed row per IMDb person with a resolvable name, grain nconst.
     columns:
       - {name: nconst, description: Person dimension key., data_tests: [not_null, unique]}
       - {name: primary_name, description: Primary person name.}
       - {name: birth_year, description: Birth year.}
-      - {name: death_year, description: Death year, if known.}
+      - {name: death_year, description: "Death year, if known."}
       - {name: primary_professions, description: Top professions array.}
       - {name: known_for_titles, description: Known-for title identifier array.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
@@ -82,7 +82,7 @@ models:
               arguments: {to: "ref('dim_people')", field: nconst}
       - {name: ordering, description: Credit ordering.}
       - {name: category, description: Credit category.}
-      - {name: job, description: Specific job title, if applicable.}
+      - {name: job, description: "Specific job title, if applicable."}
       - {name: characters, description: Character name array.}
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_crew
@@ -128,7 +128,7 @@ models:
               arguments: {to: "ref('dim_titles')", field: tconst}
       - {name: genres, description: Sorted genre array., data_tests: [not_null]}
   - name: int_title_director_lists
-    description: One persisted director name and IMDb identifier array per title.
+    description: One persisted director-name array per title.
     columns:
       - name: tconst
         description: Title key.
@@ -137,10 +137,9 @@ models:
           - unique
           - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
-      - {name: directors, description: Director-name array ordered consistently with director_ids., data_tests: [not_null]}
-      - {name: director_ids, description: Director IMDb person identifier array aligned with directors., data_tests: [not_null]}
+      - {name: directors, description: "Director-name array ordered by display name, excluding directors with no resolvable name.", data_tests: [not_null]}
   - name: int_title_writer_lists
-    description: One persisted writer name and IMDb identifier array per title.
+    description: One persisted writer-name array per title.
     columns:
       - name: tconst
         description: Title key.
@@ -149,17 +148,26 @@ models:
           - unique
           - relationships_with_max_orphan_ratio:
               arguments: {to: "ref('dim_titles')", field: tconst}
-      - {name: writers, description: Writer-name array ordered consistently with writer_ids., data_tests: [not_null]}
-      - {name: writer_ids, description: Writer IMDb person identifier array aligned with writers., data_tests: [not_null]}
-  - name: int_title_principal_cast_lists
-    description: One persisted, ordered principal-cast name and IMDb identifier array per title.
+      - {name: writers, description: "Writer-name array ordered by display name, excluding writers with no resolvable name.", data_tests: [not_null]}
+  - name: int_title_search_core
+    description: Persisted narrow title-search attributes used to bound final mart join memory.
     columns:
-      - name: tconst
-        description: Title key.
-        data_tests:
-          - not_null
-          - unique
-          - relationships_with_max_orphan_ratio:
-              arguments: {to: "ref('dim_titles')", field: tconst}
-      - {name: principal_cast, description: Principal-cast name array in IMDb credit order., data_tests: [not_null]}
-      - {name: principal_cast_ids, description: Principal-cast IMDb person identifier array aligned with principal_cast., data_tests: [not_null]}
+      - {name: tconst, description: Title key., data_tests: [not_null, unique]}
+      - {name: title_type, description: IMDb title type.}
+      - {name: primary_title, description: Primary display title.}
+      - {name: original_title, description: Original title text.}
+      - {name: is_adult, description: Adult-content flag.}
+      - {name: start_year, description: Release start year.}
+      - {name: end_year, description: TV series end year.}
+      - {name: runtime_minutes, description: Runtime in minutes.}
+      - {name: episode_count, description: Episode count for parent series.}
+      - {name: average_rating, description: Optional average rating.}
+      - {name: num_votes, description: Optional vote count.}
+      - {name: genres, description: Optional genre array.}
+      - {name: dlt_load_id, description: Raw title lineage., data_tests: [not_null]}
+  - name: int_title_search_credits
+    description: Persisted title-grain director and writer arrays used by the title-search mart.
+    columns:
+      - {name: tconst, description: Title key., data_tests: [not_null, unique]}
+      - {name: directors, description: Optional director-name array.}
+      - {name: writers, description: Optional writer-name array.}

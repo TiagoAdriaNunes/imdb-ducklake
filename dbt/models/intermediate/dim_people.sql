@@ -7,3 +7,4 @@ select
     known_for_titles,
     dlt_load_id
 from {{ ref('stg_imdb__name_basics') }}
+where primary_name is not null
