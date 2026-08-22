@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 
 import duckdb
@@ -10,6 +11,10 @@ from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
 
 ATTACH_ALIAS = "imdb_lake"
+
+_SQL_DIR = resources.files("imdb_ducklake.query") / "sql"
+_SEARCH_TITLES_SQL = (_SQL_DIR / "search_titles.sql").read_text(encoding="utf-8")
+_TOP_TITLES_SQL = (_SQL_DIR / "top_titles.sql").read_text(encoding="utf-8")
 
 
 def _sql_string(value: str) -> str:
@@ -47,14 +52,5 @@ def search_titles(
 ) -> duckdb.DuckDBPyRelation:
     """Search mart_title_search by title substring, ordered by vote count descending."""
     if query.strip():
-        return connection.sql(
-            "select * from marts.mart_title_search "
-            "where primary_title ilike '%' || ? || '%' "
-            "order by num_votes desc nulls last "
-            "limit ?",
-            params=[query, limit],
-        )
-    return connection.sql(
-        "select * from marts.mart_title_search order by num_votes desc nulls last limit ?",
-        params=[limit],
-    )
+        return connection.sql(_SEARCH_TITLES_SQL, params=[query, limit])
+    return connection.sql(_TOP_TITLES_SQL, params=[limit])
