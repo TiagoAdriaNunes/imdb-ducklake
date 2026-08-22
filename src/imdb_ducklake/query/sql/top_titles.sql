@@ -12,8 +12,15 @@ select
     array_to_string(directors, ', ') as "Directors",
     array_to_string(principal_cast, ', ') as "Cast"
 from marts.mart_title_search
-where num_votes >= 50000
+where
+    num_votes >= 50000
     and title_type in ('movie', 'tvSeries')
-    and (?::varchar[] is null or title_type = any(?::varchar[]))
+    {% if title_types %}
+        and title_type in (
+            {% for title_type in title_types %}
+                '{{ title_type | replace("'", "''") }}'{% if not loop.last %},{% endif %}
+            {% endfor %}
+        )
+    {% endif %}
 order by average_rating desc nulls last, num_votes desc nulls last
-limit ?
+limit {{ limit }}

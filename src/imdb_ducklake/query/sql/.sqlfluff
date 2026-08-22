@@ -1,0 +1,8 @@
+[sqlfluff]
+# These quoted aliases are intentionally presentation labels returned to the UI.
+exclude_rules = references.quoting, structure.using, references.keywords, references.special_chars
+
+[sqlfluff:templater:jinja:context]
+limit = 50
+query = matrix
+title_types = ["movie", "tvSeries"]

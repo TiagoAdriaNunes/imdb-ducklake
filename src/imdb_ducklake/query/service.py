@@ -6,19 +6,22 @@ from importlib import resources
 from pathlib import Path
 
 import duckdb
+from jinja2 import Template
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
 
 ATTACH_ALIAS = "imdb_lake"
 
-_SQL_DIR = resources.files("imdb_ducklake.query") / "sql"
-_SEARCH_TITLES_SQL = (_SQL_DIR / "search_titles.sql").read_text(encoding="utf-8")
-_TOP_TITLES_SQL = (_SQL_DIR / "top_titles.sql").read_text(encoding="utf-8")
-
-
 def _sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+_SQL_DIR = resources.files("imdb_ducklake.query") / "sql"
+_SEARCH_TITLES_TEMPLATE = Template(
+    (_SQL_DIR / "search_titles.sql").read_text(encoding="utf-8")
+)
+_TOP_TITLES_TEMPLATE = Template((_SQL_DIR / "top_titles.sql").read_text(encoding="utf-8"))
 
 
 def attach_sql(catalog_path: Path, storage_dir: Path) -> str:
@@ -54,6 +57,14 @@ def search_titles(
     limit: int = 50,
 ) -> duckdb.DuckDBPyRelation:
     """Search mart_title_search by title substring and optional type filter."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
     if query.strip():
-        return connection.sql(_SEARCH_TITLES_SQL, params=[query, title_types, title_types, limit])
-    return connection.sql(_TOP_TITLES_SQL, params=[title_types, title_types, limit])
+        sql = _SEARCH_TITLES_TEMPLATE.render(
+            query=query,
+            title_types=title_types,
+            limit=limit,
+        )
+        return connection.sql(sql)
+    sql = _TOP_TITLES_TEMPLATE.render(title_types=title_types, limit=limit)
+    return connection.sql(sql)
