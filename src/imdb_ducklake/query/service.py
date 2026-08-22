@@ -13,14 +13,13 @@ from imdb_ducklake.exceptions import NoPromotedBuildError
 
 ATTACH_ALIAS = "imdb_lake"
 
+
 def _sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
 _SQL_DIR = resources.files("imdb_ducklake.query") / "sql"
-_SEARCH_TITLES_TEMPLATE = Template(
-    (_SQL_DIR / "search_titles.sql").read_text(encoding="utf-8")
-)
+_SEARCH_TITLES_TEMPLATE = Template((_SQL_DIR / "search_titles.sql").read_text(encoding="utf-8"))
 _TOP_TITLES_TEMPLATE = Template((_SQL_DIR / "top_titles.sql").read_text(encoding="utf-8"))
 
 
