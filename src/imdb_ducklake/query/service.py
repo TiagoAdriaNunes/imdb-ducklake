@@ -48,9 +48,12 @@ def connect_readonly(settings: Settings) -> duckdb.DuckDBPyConnection:
 
 
 def search_titles(
-    connection: duckdb.DuckDBPyConnection, query: str, limit: int = 50
+    connection: duckdb.DuckDBPyConnection,
+    query: str,
+    title_types: list[str] | None = None,
+    limit: int = 50,
 ) -> duckdb.DuckDBPyRelation:
-    """Search mart_title_search by title substring, ordered by vote count descending."""
+    """Search mart_title_search by title substring and optional type filter."""
     if query.strip():
-        return connection.sql(_SEARCH_TITLES_SQL, params=[query, limit])
-    return connection.sql(_TOP_TITLES_SQL, params=[limit])
+        return connection.sql(_SEARCH_TITLES_SQL, params=[query, title_types, title_types, limit])
+    return connection.sql(_TOP_TITLES_SQL, params=[title_types, title_types, limit])

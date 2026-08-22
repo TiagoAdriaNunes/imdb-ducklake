@@ -52,7 +52,13 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
              ['Keanu Reeves'], 'load1'),
             ('tt0000003', 'movie', 'Inception', 'Inception', false, 2010, NULL,
              148, 8.8, 2300000, ['Action', 'Sci-Fi'], ['Christopher Nolan'],
-             ['Leonardo DiCaprio'], 'load1')
+             ['Leonardo DiCaprio'], 'load1'),
+            ('tt0000004', 'tvSeries', 'Breaking Bad', 'Breaking Bad', false, 2008, 2013,
+             47, 9.5, 2100000, ['Crime', 'Drama'], ['Vince Gilligan'],
+             ['Bryan Cranston'], 'load1'),
+            ('tt0000005', 'short', 'Bao', 'Bao', false, 2018, NULL,
+             8, 8.1, 90000, ['Animation', 'Comedy', 'Drama'], ['Domee Shi'],
+             ['Domee Shi'], 'load1')
         """
     )
     connection.close()
@@ -98,7 +104,7 @@ def test_search_titles_empty_query_returns_top_by_votes(
 
     tconsts = _tconsts(search_titles(connection, ""))
 
-    assert tconsts == ["tt0000003", "tt0000001", "tt0000002"]
+    assert tconsts == ["tt0000004", "tt0000003", "tt0000001", "tt0000002"]
 
 
 def test_search_titles_respects_limit(settings_with_fixture_build: Settings) -> None:
@@ -106,4 +112,22 @@ def test_search_titles_respects_limit(settings_with_fixture_build: Settings) -> 
 
     tconsts = _tconsts(search_titles(connection, "", limit=1))
 
-    assert tconsts == ["tt0000003"]
+    assert tconsts == ["tt0000004"]
+
+
+def test_search_titles_filters_by_type(settings_with_fixture_build: Settings) -> None:
+    connection = connect_readonly(settings_with_fixture_build)
+
+    tconsts = _tconsts(search_titles(connection, "", title_types=["tvSeries"]))
+
+    assert tconsts == ["tt0000004"]
+
+
+def test_search_titles_excludes_non_movie_series_types(
+    settings_with_fixture_build: Settings,
+) -> None:
+    connection = connect_readonly(settings_with_fixture_build)
+
+    tconsts = _tconsts(search_titles(connection, ""))
+
+    assert "tt0000005" not in tconsts

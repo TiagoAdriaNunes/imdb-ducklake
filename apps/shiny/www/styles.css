@@ -47,3 +47,23 @@ body {
 table.dataTable tbody tr:hover {
     background-color: #f8f9fa !important;
 }
+
+.dt-paging .dt-paging-button {
+    color: #000 !important;
+    background: #fff !important;
+}
+.dt-paging .dt-paging-button.current,
+.dt-paging .dt-paging-button.current:hover {
+    color: #000 !important;
+    background: #f1f1f1 !important;
+    border-color: rgba(0, 0, 0, 0.3) !important;
+}
+.dt-paging .dt-paging-button:hover {
+    color: #fff !important;
+    background: #1a1a1a !important;
+    border-color: #1a1a1a !important;
+}
+.dt-paging .dt-paging-button.disabled {
+    color: #00000080 !important;
+    background: transparent !important;
+}
