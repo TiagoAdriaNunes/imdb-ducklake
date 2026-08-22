@@ -10,9 +10,15 @@ GH_PAGES_DIR := ../imdb-ducklake-gh-pages
 REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 DBT_ENV := \
 	IMDB_DUCKLAKE_DBT_CONTROLLER="$(REPO_ROOT)/data/.dbt/controller.duckdb" \
-	IMDB_DUCKLAKE_DUCKDB_TEMP_DIRECTORY="$(REPO_ROOT)/data/.dbt/tmp" \
 	IMDB_DUCKLAKE_CATALOG="$(REPO_ROOT)/data/ducklake/current/catalog.duckdb" \
 	IMDB_DUCKLAKE_STORAGE="$(REPO_ROOT)/data/ducklake/current/storage"
+
+# LOG_FORMAT=json (add to any pipeline target below) sets IMDB_LAKEHOUSE_LOG_FORMAT for that run,
+# e.g. `make build LOG_FORMAT=json`. The CLI's own --log-format flag is a global option that must
+# precede the subcommand, so it cannot be passed through ARGS (which is appended after it).
+ifdef LOG_FORMAT
+PIPELINE_ENV := IMDB_LAKEHOUSE_LOG_FORMAT=$(LOG_FORMAT)
+endif
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
@@ -42,7 +48,7 @@ help:
 	@echo "  make docs            dbt docs generate (against whatever catalog is configured)"
 	@echo "  make publish-docs    generate + stage docs on the gh-pages branch (review, then push)"
 	@echo ""
-	@echo "Lakehouse pipeline (imdb-lakehouse CLI)"
+	@echo "Lakehouse pipeline (imdb-lakehouse CLI; add LOG_FORMAT=json to any of these for JSON logs)"
 	@echo "  make download        download and verify all seven IMDb archives"
 	@echo "  make ingest          load retained archives into an isolated raw build"
 	@echo "  make transform       run dbt build against the staged build"
@@ -110,25 +116,25 @@ shell-ui:
 	uv run python scripts/duckdb_shell.py --ui
 
 download:
-	uv run imdb-lakehouse download $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse download $(ARGS)
 
 ingest:
-	uv run imdb-lakehouse ingest $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse ingest $(ARGS)
 
 transform:
-	uv run imdb-lakehouse transform $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse transform $(ARGS)
 
 build:
-	uv run imdb-lakehouse build $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse build $(ARGS)
 
 validate:
-	uv run imdb-lakehouse validate $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse validate $(ARGS)
 
 promote:
-	uv run imdb-lakehouse promote $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse promote $(ARGS)
 
 checkpoint:
-	uv run imdb-lakehouse checkpoint $(ARGS)
+	$(PIPELINE_ENV) uv run imdb-lakehouse checkpoint $(ARGS)
 
 KEEP ?= 3
 clean-dlt-pipelines:
