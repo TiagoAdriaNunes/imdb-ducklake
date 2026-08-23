@@ -8,6 +8,7 @@ Pass --ui to open DuckDB's local web UI instead of/alongside the terminal shell.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -18,7 +19,7 @@ from pathlib import Path
 import duckdb
 
 from imdb_ducklake.config import Settings
-from imdb_ducklake.exceptions import ImdbLakehouseError
+from imdb_ducklake.exceptions import ImdbLakehouseError, NoPromotedBuildError
 from imdb_ducklake.query.service import ATTACH_ALIAS, configured_attach_sql
 
 # `winget install <id>` always lands packages under this fixed, non-machine-specific suffix
@@ -95,10 +96,46 @@ def _run_python_fallback(attach_sql: str, *, ui: bool) -> None:
             buffer = ""
 
 
+def _check_postgres_healthy(repository_root: Path) -> None:
+    """Fail fast with an actionable message if the shared catalog's container isn't up."""
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "ps", "postgres", "--format", "json"],
+            cwd=repository_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise NoPromotedBuildError(
+            "Could not reach Docker to check the PostgreSQL container. Is Docker running?"
+        ) from error
+    if result.returncode != 0:
+        raise NoPromotedBuildError(
+            f"docker compose ps failed: {(result.stderr or result.stdout).strip()}"
+        )
+    lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
+    if not lines:
+        raise NoPromotedBuildError(
+            "PostgreSQL container is not running. "
+            "Start it with: docker compose up -d --wait postgres"
+        )
+    service = json.loads(lines[0])
+    state = service.get("State", "")
+    health = service.get("Health", "")
+    if state != "running" or (health and health != "healthy"):
+        raise NoPromotedBuildError(
+            f"PostgreSQL container is not ready (state={state!r}, health={health!r}). "
+            "Start/check it with: docker compose up -d --wait postgres"
+        )
+
+
 def main() -> None:
     ui = "--ui" in sys.argv[1:]
     settings = Settings.load()
-    attach_sql_str = configured_attach_sql(settings)
+    if settings.catalog_url is not None:
+        _check_postgres_healthy(settings.repository_root)
+    attach_sql_str = configured_attach_sql(settings) + f"USE {ATTACH_ALIAS}.marts;\n"
     executable = _find_duckdb()
     if executable:
         _run_real_cli(executable, attach_sql_str, ui=ui)
