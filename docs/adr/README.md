@@ -12,3 +12,4 @@ should add a superseding ADR rather than rewriting history.
 - [0007: Local single-user reliability policy](0007-local-reliability-policy.md)
 - [0008: Schema compatibility policy](0008-schema-compatibility-policy.md)
 - [0009: Bounded parallelism for dlt extraction and load](0009-bounded-ingestion-parallelism.md)
+- [0010: Use PostgreSQL as the authoritative DuckLake catalog](0010-postgresql-authoritative-ducklake-catalog.md)

@@ -1,3 +1,5 @@
+{{ config(materialized='table') }}
+
 select
     tconst,
     dlt_load_id,

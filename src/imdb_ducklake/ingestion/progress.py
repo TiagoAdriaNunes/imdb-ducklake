@@ -80,7 +80,7 @@ class RichProgressCollector(Collector):
                 SpinnerColumn(),
                 TextColumn(
                     "[progress.description]{task.description}",
-                    table_column=Column(ratio=1),
+                    table_column=Column(width=28, no_wrap=True),
                 ),
                 BarColumn(bar_width=None, table_column=Column(ratio=2)),
                 TaskProgressColumn(),

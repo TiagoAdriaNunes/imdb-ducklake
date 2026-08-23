@@ -30,6 +30,10 @@ def test_settings_resolve_environment_values_from_root(tmp_path, monkeypatch) ->
     monkeypatch.setenv("IMDB_LAKEHOUSE_LOG_LEVEL", "debug")
     monkeypatch.setenv("IMDB_LAKEHOUSE_LOG_FORMAT", "json")
     monkeypatch.setenv("IMDB_LAKEHOUSE_PROGRESS_INTERVAL_SECONDS", "15")
+    monkeypatch.setenv(
+        "IMDB_DUCKLAKE_CATALOG_URL",
+        "postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
 
     settings = Settings.load(repository_root=root)
 
@@ -44,6 +48,7 @@ def test_settings_resolve_environment_values_from_root(tmp_path, monkeypatch) ->
     assert settings.current_dir == settings.lakehouse_dir / "current"
     assert settings.dlt_pipelines_dir == settings.data_dir / ".dlt" / "pipelines"
     assert settings.dbt_project_dir == root.resolve() / "dbt"
+    assert settings.catalog_url == "postgresql://imdb:secret@postgres:5432/ducklake_catalog"
 
 
 def test_explicit_settings_override_environment(tmp_path, monkeypatch) -> None:

@@ -6,6 +6,7 @@ import pytest
 
 from imdb_ducklake.exceptions import ValidationError
 from imdb_ducklake.lakehouse import validation as validation_module
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
 from imdb_ducklake.lakehouse.validation import (
     REQUIRED_RELATIONS,
@@ -51,6 +52,37 @@ def test_runs_validation_in_a_separate_python_process(tmp_path) -> None:
     assert "--catalog" in command
     assert cwd == tmp_path
     assert environment["EXISTING"] == "value"
+
+
+def test_postgresql_validation_passes_catalog_secret_via_environment(tmp_path) -> None:
+    paths = BuildPaths.create(tmp_path / "ducklake", build_id="postgres-build")
+    initialize_build(paths)
+    target = CatalogTarget(
+        "postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+        tmp_path / "storage",
+    )
+    target.storage_dir.mkdir()
+    payload = {"build_id": paths.build_id, "relation_count": 31, "mart_row_counts": {}}
+    received = None
+
+    def runner(command, cwd, environment):
+        nonlocal received
+        received = command, environment
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    validate_build(
+        paths,
+        executable="python",
+        environment={},
+        working_directory=tmp_path,
+        runner=runner,
+        catalog_target=target,
+    )
+
+    assert received is not None
+    command, environment = received
+    assert "--catalog" not in command
+    assert environment["IMDB_DUCKLAKE_VALIDATION_CATALOG"].startswith("postgres:dbname=")
 
 
 def test_rejects_incomplete_build_and_failed_or_invalid_worker_output(tmp_path) -> None:

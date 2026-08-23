@@ -1,4 +1,4 @@
-"""Home page: search IMDb titles from the locally promoted DuckLake build."""
+"""Home page: search IMDb titles from the configured DuckLake catalog."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def titles_server(
     title_type: str,
     show_end_year: bool,
 ) -> None:
-    """Serve one title-type tab from the promoted DuckLake build."""
+    """Serve one title-type tab from the configured DuckLake catalog."""
     settings = Settings.load()
     startup_error: str | None = None
     connection = None
@@ -131,7 +131,7 @@ def titles_server(
     def results():
         if startup_error is not None or connection is None:
             ui.notification_show(startup_error, type="error", duration=None)
-            return ui.p("No promoted build available. Run `make build` first.")
+            return ui.p("No queryable lakehouse is available. Build the catalog first.")
         frame = search_titles(
             connection, input.query() or "", title_type=title_type, limit=500
         ).df()

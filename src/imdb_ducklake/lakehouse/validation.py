@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -11,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from imdb_ducklake.exceptions import ValidationError
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths
 
 ProcessRunner = Callable[
@@ -84,8 +86,28 @@ def validate_build(
     environment: Mapping[str, str],
     working_directory: Path,
     runner: ProcessRunner | None = None,
+    catalog_target: CatalogTarget | None = None,
 ) -> ValidationResult:
     """Validate a build through a separate Python process and a read-only attachment."""
+    if catalog_target is not None:
+        if not catalog_target.storage_dir.is_dir():
+            raise ValidationError(f"DuckLake storage does not exist: {catalog_target.storage_dir}")
+        command = (
+            executable,
+            "-m",
+            "imdb_ducklake.lakehouse.validation",
+            "--storage",
+            str(catalog_target.storage_dir),
+            "--build-id",
+            build_paths.build_id,
+            "--metadata-schema",
+            catalog_target.metadata_schema,
+        )
+        child_environment = dict(environment)
+        child_environment["IMDB_DUCKLAKE_VALIDATION_CATALOG"] = catalog_target.duckdb_metadata_path
+        return _execute_validation(
+            command, build_paths.build_id, working_directory, child_environment, runner
+        )
     return validate_catalog(
         catalog_path=build_paths.catalog_path,
         storage_dir=build_paths.storage_dir,
@@ -123,12 +145,18 @@ def validate_catalog(
         "--build-id",
         build_id,
     )
+    return _execute_validation(command, build_id, working_directory, dict(environment), runner)
+
+
+def _execute_validation(
+    command: Sequence[str],
+    build_id: str,
+    working_directory: Path,
+    environment: Mapping[str, str],
+    runner: ProcessRunner | None,
+) -> ValidationResult:
     try:
-        completed = (runner or _run_process)(
-            command,
-            working_directory.resolve(),
-            dict(environment),
-        )
+        completed = (runner or _run_process)(command, working_directory.resolve(), environment)
     except OSError as error:
         raise ValidationError("Could not start the fresh-process validation gate") from error
     if completed.returncode != 0:
@@ -166,18 +194,28 @@ def _run_process(
     )
 
 
-def _validate_read_only(catalog_path: Path, storage_dir: Path, build_id: str) -> ValidationResult:
+def _validate_read_only(
+    catalog: str, storage_dir: Path, build_id: str, metadata_schema: str = "main"
+) -> ValidationResult:
     try:
         import duckdb
 
         connection = duckdb.connect(":memory:")
         try:
             connection.execute("LOAD ducklake")
-            catalog = _sql_string(f"ducklake:{catalog_path.resolve().as_posix()}")
+            catalog_value = str(catalog)
+            metadata_path = (
+                catalog_value
+                if catalog_value.startswith("postgres:")
+                else Path(catalog_value).resolve().as_posix()
+            )
+            catalog_sql = _sql_string(f"ducklake:{metadata_path}")
             storage = _sql_string(storage_dir.resolve().as_posix())
+            schema = _sql_string(metadata_schema)
             connection.execute(
-                f"ATTACH {catalog} AS imdb_lake "
-                f"(DATA_PATH {storage}, OVERRIDE_DATA_PATH true, READ_ONLY)"
+                f"ATTACH {catalog_sql} AS imdb_lake "
+                f"(DATA_PATH {storage}, METADATA_SCHEMA {schema}, "
+                "OVERRIDE_DATA_PATH true, READ_ONLY)"
             )
             rows = connection.execute(
                 """
@@ -248,12 +286,18 @@ def _sql_string(value: str) -> str:
 
 def _worker_main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--catalog", type=Path, required=True)
+    parser.add_argument("--catalog")
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--build-id", required=True)
+    parser.add_argument("--metadata-schema", default="main")
     options = parser.parse_args(arguments)
     try:
-        result = _validate_read_only(options.catalog, options.storage, options.build_id)
+        catalog = options.catalog or os.environ.get("IMDB_DUCKLAKE_VALIDATION_CATALOG")
+        if not catalog:
+            raise ValidationError("DuckLake validation catalog is not configured")
+        result = _validate_read_only(
+            catalog, options.storage, options.build_id, options.metadata_schema
+        )
     except ValidationError as error:
         print(str(error), file=sys.stderr)
         return 1

@@ -51,6 +51,7 @@ def _install_successful_stages(monkeypatch) -> None:
         build_paths,
         pipelines_dir,
         progress,
+        catalog_target=None,
     ):
         assert isinstance(progress, StructuredLogCollector)
         assert progress.log_period == 10.0
@@ -133,6 +134,60 @@ def test_build_id_correlates_every_stage_including_acquisition(tmp_path, monkeyp
     assert "build_lock_waiting" in event_codes
     assert "acquisition_started" in event_codes
     assert "free_space_gate_passed" in event_codes
+
+
+def test_postgresql_build_bypasses_file_promotion_and_checkpoint(tmp_path, monkeypatch) -> None:
+    base = _settings(tmp_path)
+    settings = Settings(
+        repository_root=base.repository_root,
+        data_dir=base.data_dir,
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    downloader = FakeDownloader()
+    calls: dict[str, object] = {}
+
+    def ingest(artifacts, *, build_paths, pipelines_dir, progress, catalog_target):
+        catalog_target.storage_dir.mkdir(parents=True, exist_ok=True)
+        calls["ingestion_target"] = catalog_target
+        return IngestionResult(
+            "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir
+        )
+
+    def transform(*_args, catalog_target, **_kwargs):
+        calls["dbt_target"] = catalog_target
+        return DbtRunResult(("dbt", "build"), "passed", "")
+
+    def validate(paths, *, catalog_target, **_kwargs):
+        calls["validation_target"] = catalog_target
+        return ValidationResult(paths.build_id, 31, {"mart": 1})
+
+    monkeypatch.setattr(build_module, "ingest_snapshot", ingest)
+    monkeypatch.setattr(build_module, "run_dbt", transform)
+    monkeypatch.setattr(build_module, "validate_build", validate)
+    monkeypatch.setattr(
+        build_module,
+        "promote_build",
+        lambda *_a, **_kw: pytest.fail("file promotion must not run"),
+    )
+    monkeypatch.setattr(
+        build_module,
+        "checkpoint_lakehouse",
+        lambda *_a, **_kw: pytest.fail("file checkpoint must not run"),
+    )
+
+    result = build_lakehouse(
+        settings=settings,
+        downloader=downloader,
+        dbt_executable="dbt",
+        python_executable="python",
+        environment={},
+        reserve_bytes=0,
+    )
+
+    assert calls["ingestion_target"] == calls["dbt_target"]
+    assert calls["dbt_target"] == calls["validation_target"]
+    assert result.promoted.storage_dir == settings.lakehouse_dir / "storage"
+    assert not list(settings.data_dir.rglob("catalog.duckdb"))
 
 
 @pytest.mark.parametrize("stage", ["acquisition", "ingestion", "dbt", "validation", "promotion"])

@@ -7,9 +7,11 @@ A reproducible local analytics lakehouse built from the official IMDb non-commer
 The project uses:
 
 - **dlt** for lossless raw ingestion and load metadata
-- **DuckDB and DuckLake** for query execution, cataloging, snapshots, and Parquet storage
+- **PostgreSQL** as the authoritative DuckLake metadata catalog
+- **DuckLake and Parquet** for table metadata, snapshots, and analytical storage
+- **DuckDB** as the embedded execution engine used by dlt, dbt, validation, and the application
 - **dbt** for typed staging models, tests, and analytics-ready marts
-- **Shiny for Python** in a later phase for interactive exploration
+- **Shiny for Python** for interactive exploration of the analytical marts
 
 > IMDb permits these datasets for personal and non-commercial use. This repository contains code
 > and miniature synthetic fixtures only. It never redistributes IMDb source archives, extracted
@@ -22,6 +24,19 @@ documented in [`docs/architecture.md`](docs/architecture.md). Architectural deci
 under [`docs/adr/`](docs/adr/README.md). Generated dbt docs (model/column reference, lineage graph,
 compiled SQL) are published at
 **[tiagoadrianunes.github.io/imdb-ducklake](https://tiagoadrianunes.github.io/imdb-ducklake/)**.
+
+The runtime catalog contract is defined by
+[ADR 0010](docs/adr/0010-postgresql-authoritative-ducklake-catalog.md):
+
+| Responsibility | Authoritative component |
+| --- | --- |
+| DuckLake metadata and snapshot state | PostgreSQL (`ducklake_catalog`, schema `imdb_lake`) |
+| Analytical table data | Parquet under `data/ducklake/storage/` |
+| SQL execution | Embedded DuckDB connections attaching the PostgreSQL-backed DuckLake catalog |
+
+**PostgreSQL replaces `catalog.duckdb` as the durable catalog in the Compose workflow; it does not
+replace DuckDB as the query engine.** The non-Docker file-catalog commands remain an isolated local
+fallback and are not synchronized with the PostgreSQL catalog used by Docker and Shiny.
 
 ## Modules
 
@@ -70,6 +85,40 @@ every check `.github/workflows/ci.yml` runs, in the same order.
 instead; this is an unrelated Windows/antivirus filesystem limitation, not a project issue. Set
 `$env:UV_LINK_MODE = "copy"` (PowerShell) to silence it.
 
+## Run the pipeline in Docker
+
+Docker Compose is the supported shared runtime with a PostgreSQL-backed DuckLake metadata catalog.
+It does not run a queue, scheduler, or persistent worker. The original local commands remain
+available for the file-catalog/staged-build fallback; use the explicit `docker-*` commands for the
+authoritative PostgreSQL workflow:
+
+```console
+make docker-image
+make docker-build
+make docker-download
+make docker-ingest
+make docker-transform
+make docker-validate
+make docker-checkpoint
+make docker-app
+```
+
+Each operational Docker target starts PostgreSQL if necessary, refreshes the Linux image, and runs
+one disposable `lakehouse` container. The PostgreSQL service retains DuckLake metadata in its named
+volume; the `./data:/data` bind mount retains the raw archives and Parquet data under
+`data/ducklake/storage/` on the host. `docker-transform`, `docker-validate`, and
+`docker-checkpoint` reuse that existing catalog and storage without repeating ingestion. dlt and dbt
+concurrency remain internal settings; callers do not create or coordinate process workers.
+
+`make docker-app` starts the Shiny application at <http://localhost:8000>. The app executes queries
+with an in-process DuckDB connection, reads DuckLake metadata from the same PostgreSQL service, and
+reads the existing Parquet files from the read-only `/data/ducklake/storage` mount. Stop the app and
+PostgreSQL with `make docker-down`; use `make docker-app-logs` to follow its logs.
+
+The Docker defaults are sized for an 8 GB Docker Desktop VM: one concurrent dbt node, two DuckDB
+query threads, and a 6 GB DuckDB memory limit. Override `IMDB_DUCKLAKE_DBT_THREADS`,
+`IMDB_DUCKLAKE_QUERY_THREADS`, or `IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT` in `.env` on a larger host.
+
 ## Logging and run correlation
 
 Interactive commands emit concise console events by default. Use the global option before the
@@ -109,6 +158,10 @@ The same event in `--log-format json` mode, one self-contained JSON object per l
 ```json
 {"record": {"time": {"repr": "2026-08-16T14:32:07"}, "level": {"name": "INFO"}, "message": "Free-space check passed", "extra": {"event_code": "free_space_gate_passed", "stage": "lifecycle", "status": "completed", "run_id": "1f2e3a4b-...", "build_id": "20260816T143206Z-ab12cd", "required_bytes": 1288490188, "available_bytes": 61782441984}}}
 ```
+
+> Unprefixed pipeline targets in the sections below (`make build`, `make ingest`, `make transform`,
+> and related commands) describe the isolated local file-catalog fallback. Use the corresponding
+> `docker-*` targets when working with the authoritative PostgreSQL catalog used by Shiny.
 
 ## Download IMDb datasets
 
@@ -293,17 +346,22 @@ multi-minute dlt ingestion of the seven raw archives is not repeated.
 
 ## Query the analytical marts
 
-Attach a promoted catalog read-only from DuckDB. Replace the two paths when `--data-dir` was used:
+DuckDB remains the query engine. Attach it read-only to the authoritative PostgreSQL-backed
+DuckLake catalog, using the configured PostgreSQL credentials and the host Parquet path:
 
 ```sql
 LOAD ducklake;
-ATTACH 'ducklake:D:/path/to/imdb-ducklake/data/ducklake/current/catalog.duckdb'
+ATTACH 'ducklake:postgres:dbname=''ducklake_catalog'' host=''localhost'' port=5432 user=''imdb'' password=''imdb-local-dev'''
     AS imdb_lake (
-        DATA_PATH 'D:/path/to/imdb-ducklake/data/ducklake/current/storage',
+        DATA_PATH 'D:/path/to/imdb-ducklake/data/ducklake/storage',
+        METADATA_SCHEMA 'imdb_lake',
         OVERRIDE_DATA_PATH true,
         READ_ONLY
     );
 ```
+
+The shown password is the Compose development default; use the values configured in `.env`. From
+inside Compose, the PostgreSQL host is `postgres` and the data path is `/data/ducklake/storage`.
 
 Search well-rated titles without reading raw tables:
 

@@ -13,6 +13,7 @@ from typing import IO
 from loguru import logger
 
 from imdb_ducklake.exceptions import TransformationError
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths
 
 _DBT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+")
@@ -44,6 +45,7 @@ def run_dbt(
     environment: Mapping[str, str],
     runner: ProcessRunner | None = None,
     output_handler: DbtOutputHandler | None = None,
+    catalog_target: CatalogTarget | None = None,
 ) -> DbtRunResult:
     """Run dbt with explicit paths and environment against the given DuckLake catalog."""
     if not dbt_args:
@@ -51,7 +53,7 @@ def run_dbt(
     resolved_project = project_dir.resolve()
     resolved_profiles = profiles_dir.resolve()
     resolved_controller = controller_path.resolve()
-    _validate_inputs(build_paths, resolved_project, resolved_profiles)
+    _validate_inputs(build_paths, resolved_project, resolved_profiles, catalog_target)
     try:
         resolved_controller.parent.mkdir(parents=True, exist_ok=True)
     except OSError as error:
@@ -71,8 +73,19 @@ def run_dbt(
     process_environment = dict(environment)
     process_environment.update(
         {
-            "IMDB_DUCKLAKE_CATALOG": build_paths.catalog_path.as_posix(),
-            "IMDB_DUCKLAKE_STORAGE": build_paths.storage_dir.as_posix(),
+            "IMDB_DUCKLAKE_CATALOG": (
+                catalog_target.duckdb_metadata_path
+                if catalog_target is not None
+                else build_paths.catalog_path.as_posix()
+            ),
+            "IMDB_DUCKLAKE_STORAGE": (
+                catalog_target.storage_dir.as_posix()
+                if catalog_target is not None
+                else build_paths.storage_dir.as_posix()
+            ),
+            "IMDB_DUCKLAKE_METADATA_SCHEMA": (
+                catalog_target.metadata_schema if catalog_target is not None else "main"
+            ),
             "IMDB_DUCKLAKE_DBT_CONTROLLER": resolved_controller.as_posix(),
         }
     )
@@ -162,8 +175,18 @@ def _default_output_handler(build_id: str) -> DbtOutputHandler:
     return log_output
 
 
-def _validate_inputs(build_paths: BuildPaths, project_dir: Path, profiles_dir: Path) -> None:
-    if not build_paths.catalog_path.is_file() or not build_paths.storage_dir.is_dir():
+def _validate_inputs(
+    build_paths: BuildPaths,
+    project_dir: Path,
+    profiles_dir: Path,
+    catalog_target: CatalogTarget | None,
+) -> None:
+    if catalog_target is not None:
+        if not catalog_target.storage_dir.is_dir():
+            raise TransformationError(
+                f"DuckLake storage does not exist: {catalog_target.storage_dir}"
+            )
+    elif not build_paths.catalog_path.is_file() or not build_paths.storage_dir.is_dir():
         raise TransformationError(f"DuckLake build is incomplete: {build_paths.temporary_dir}")
     if not (project_dir / "dbt_project.yml").is_file():
         raise TransformationError(f"dbt project metadata does not exist in {project_dir}")
