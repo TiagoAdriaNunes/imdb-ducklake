@@ -16,6 +16,7 @@ from typing import Any, BinaryIO, cast
 from uuid import uuid4
 
 from imdb_ducklake.exceptions import LifecycleError, PromotionError
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 
 Clock = Callable[[], datetime]
 TokenFactory = Callable[[], str]
@@ -223,15 +224,39 @@ def promote_build(
 
 def checkpoint_lakehouse(catalog_path: Path, storage_dir: Path) -> None:
     """Run DuckLake's CHECKPOINT to expire snapshots and compact small files."""
+    _checkpoint_catalog(
+        metadata_path=catalog_path.resolve().as_posix(),
+        storage_dir=storage_dir,
+        metadata_schema="main",
+    )
+
+
+def checkpoint_catalog_target(target: CatalogTarget) -> None:
+    """Checkpoint a DuckLake catalog whose metadata is stored in PostgreSQL."""
+    _checkpoint_catalog(
+        metadata_path=target.duckdb_metadata_path,
+        storage_dir=target.storage_dir,
+        metadata_schema=target.metadata_schema,
+    )
+
+
+def _checkpoint_catalog(
+    *,
+    metadata_path: str,
+    storage_dir: Path,
+    metadata_schema: str,
+) -> None:
     import duckdb
 
     connection = duckdb.connect(":memory:")
     try:
         connection.execute("LOAD ducklake")
-        catalog = _sql_string(f"ducklake:{catalog_path.resolve().as_posix()}")
+        catalog = _sql_string(f"ducklake:{metadata_path}")
         storage = _sql_string(storage_dir.resolve().as_posix())
+        schema = _sql_string(metadata_schema)
         connection.execute(
-            f"ATTACH {catalog} AS imdb_lake (DATA_PATH {storage}, OVERRIDE_DATA_PATH true)"
+            f"ATTACH {catalog} AS imdb_lake "
+            f"(DATA_PATH {storage}, METADATA_SCHEMA {schema}, OVERRIDE_DATA_PATH true)"
         )
         connection.execute("USE imdb_lake")
         connection.execute("CHECKPOINT")

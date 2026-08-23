@@ -190,6 +190,35 @@ def test_ingest_preserves_existing_staged_build_without_explicit_replace(
     assert staged.temporary_dir.is_dir()
 
 
+def test_ingest_command_uses_shared_catalog_when_configured(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    artifacts = (object(),) * 7
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    monkeypatch.setattr(cli, "load_verified_artifacts", lambda *_args, **_kwargs: artifacts)
+    received = None
+
+    def fake_ingest(received_artifacts, **kwargs):
+        nonlocal received
+        received = kwargs
+        assert received_artifacts == artifacts
+        return SimpleNamespace(load_ids=("load-1",), catalog_path="unused")
+
+    monkeypatch.setattr(cli, "ingest_snapshot", fake_ingest)
+
+    result = runner.invoke(cli.app, ["ingest"])
+
+    assert result.exit_code == 0
+    assert received is not None
+    assert received["catalog_target"].storage_dir == settings.lakehouse_dir / "storage"
+    assert "postgresql://postgres:5432/ducklake_catalog#imdb_lake" in result.stdout
+    assert "secret" not in result.stdout
+    assert not received["build_paths"].temporary_dir.exists()
+
+
 def test_transform_command_runs_dbt_for_staged_build(tmp_path, monkeypatch) -> None:
     settings = Settings(repository_root=tmp_path, data_dir=tmp_path / "data")
     paths = BuildPaths.create(settings.lakehouse_dir, build_id="fixture-build")
@@ -210,6 +239,33 @@ def test_transform_command_runs_dbt_for_staged_build(tmp_path, monkeypatch) -> N
 
     assert result.exit_code == 0
     assert "Transformed and tested build fixture-build; it remains unpromoted." in result.stdout
+
+
+def test_transform_command_uses_shared_catalog_when_configured(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    (settings.lakehouse_dir / "storage").mkdir(parents=True)
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    received = None
+
+    def fake_run(dbt_args, **kwargs):
+        nonlocal received
+        received = kwargs
+        assert dbt_args == ("build",)
+        return SimpleNamespace(stdout="dbt completed\n")
+
+    monkeypatch.setattr(cli, "run_dbt", fake_run)
+
+    result = runner.invoke(cli.app, ["transform", "--build-id", "shared-run"])
+
+    assert result.exit_code == 0
+    assert received is not None
+    assert received["build_paths"].build_id == "shared-run"
+    assert received["catalog_target"].storage_dir == settings.lakehouse_dir / "storage"
+    assert "PostgreSQL-backed DuckLake catalog" in result.stdout
 
 
 def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, monkeypatch) -> None:
@@ -331,6 +387,32 @@ def test_validate_command_prefers_current_without_requiring_arguments(
     assert "Validated current: 31 required relations." in result.stdout
 
 
+def test_validate_command_uses_shared_catalog_when_configured(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    (settings.lakehouse_dir / "storage").mkdir(parents=True)
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    received = None
+
+    def fake_validate(paths, **kwargs):
+        nonlocal received
+        received = (paths, kwargs)
+        return SimpleNamespace(build_id=paths.build_id, relation_count=30, mart_row_counts={})
+
+    monkeypatch.setattr(cli, "validate_build", fake_validate)
+
+    result = runner.invoke(cli.app, ["validate", "--build-id", "shared-run"])
+
+    assert result.exit_code == 0
+    assert received is not None
+    assert received[0].build_id == "shared-run"
+    assert received[1]["catalog_target"].safe_identity.endswith("#imdb_lake")
+    assert "Validated shared-run: 30 required relations." in result.stdout
+
+
 def test_checkpoint_command_uses_current_build_lock_and_structured_logs(
     tmp_path, monkeypatch
 ) -> None:
@@ -401,6 +483,25 @@ def test_checkpoint_command_logs_missing_current_as_lifecycle_failure(
     assert [message for message, _fields in events] == ["Checkpoint failed"]
     assert events[0][1]["event_code"] == "checkpoint_failed"
     assert events[0][1]["error_type"] == "LifecycleError"
+
+
+def test_checkpoint_command_uses_shared_catalog_when_configured(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    (settings.lakehouse_dir / "storage").mkdir(parents=True)
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    received = []
+    monkeypatch.setattr(cli, "checkpoint_catalog_target", received.append)
+
+    result = runner.invoke(cli.app, ["checkpoint"])
+
+    assert result.exit_code == 0
+    assert len(received) == 1
+    assert received[0].safe_identity == "postgresql://postgres:5432/ducklake_catalog#imdb_lake"
+    assert "Checkpointed shared PostgreSQL-backed lakehouse" in result.stdout
 
 
 def test_main_invokes_typer_application(monkeypatch) -> None:

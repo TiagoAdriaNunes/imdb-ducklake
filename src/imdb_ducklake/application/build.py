@@ -20,6 +20,7 @@ from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import LifecycleError
 from imdb_ducklake.ingestion.pipeline import IngestionResult, ingest_snapshot
 from imdb_ducklake.ingestion.progress import StructuredLogCollector
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
@@ -68,7 +69,7 @@ def build_lakehouse(
     reserve_bytes: int = _DEFAULT_RESERVE_BYTES,
     temporary_size_factor: int = _DEFAULT_TEMPORARY_SIZE_FACTOR,
 ) -> BuildResult:
-    """Acquire, ingest, transform, validate, and atomically promote one snapshot."""
+    """Acquire, ingest, transform, validate, and publish one snapshot."""
     if reserve_bytes < 0:
         raise ValueError("reserve_bytes must be non-negative")
     if temporary_size_factor < 1:
@@ -76,6 +77,11 @@ def build_lakehouse(
 
     started = time.monotonic()
     paths = BuildPaths.create(settings.lakehouse_dir)
+    catalog_target = (
+        CatalogTarget(settings.catalog_url, settings.lakehouse_dir / "storage")
+        if settings.catalog_url is not None
+        else None
+    )
     build_logger = logger.bind(build_id=paths.build_id)
     lock_path = settings.lakehouse_dir / ".build.lock"
     build_logger.info(
@@ -92,7 +98,8 @@ def build_lakehouse(
             stage="lifecycle",
             status="completed",
         )
-        recover_interrupted_promotion(settings.lakehouse_dir)
+        if catalog_target is None:
+            recover_interrupted_promotion(settings.lakehouse_dir)
         _check_space(
             settings,
             raw_bytes=_directory_size(settings.raw_dir),
@@ -131,7 +138,11 @@ def build_lakehouse(
             temporary_size_factor=temporary_size_factor,
             log=build_logger,
         )
-        removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
+        removed = (
+            prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
+            if catalog_target is None
+            else ()
+        )
         if removed:
             build_logger.info(
                 "Obsolete builds pruned",
@@ -163,6 +174,7 @@ def build_lakehouse(
                     if show_progress
                     else None
                 ),
+                catalog_target=catalog_target,
             )
         except BaseException:
             # An incomplete or failed raw load cannot be safely resumed, so this is the one
@@ -190,6 +202,7 @@ def build_lakehouse(
                 controller_path=settings.dbt_state_dir / f"{paths.build_id}.duckdb",
                 executable=dbt_executable,
                 environment=environment,
+                catalog_target=catalog_target,
             )
             build_logger.info(
                 "dbt build completed",
@@ -209,6 +222,7 @@ def build_lakehouse(
                 executable=python_executable,
                 environment=environment,
                 working_directory=settings.repository_root,
+                catalog_target=catalog_target,
             )
             build_logger.info(
                 "Validation completed",
@@ -220,28 +234,47 @@ def build_lakehouse(
                 mart_row_counts=validation.mart_row_counts,
             )
 
-            build_logger.info(
-                "Promotion started",
-                event_code="promotion_started",
-                stage="promotion",
-                status="started",
-            )
-            promoted = promote_build(paths)
-            build_logger.info(
-                "Promotion completed",
-                event_code="promotion_completed",
-                stage="promotion",
-                status="completed",
-                current=str(promoted.current_dir),
-            )
+            if catalog_target is None:
+                build_logger.info(
+                    "Promotion started",
+                    event_code="promotion_started",
+                    stage="promotion",
+                    status="started",
+                )
+                promoted = promote_build(paths)
+                build_logger.info(
+                    "Promotion completed",
+                    event_code="promotion_completed",
+                    stage="promotion",
+                    status="completed",
+                    current=str(promoted.current_dir),
+                )
 
-            checkpoint_lakehouse(promoted.catalog_path, promoted.storage_dir)
-            build_logger.info(
-                "Checkpoint completed",
-                event_code="checkpoint_completed",
-                stage="checkpoint",
-                status="completed",
-            )
+                checkpoint_lakehouse(promoted.catalog_path, promoted.storage_dir)
+                build_logger.info(
+                    "Checkpoint completed",
+                    event_code="checkpoint_completed",
+                    stage="checkpoint",
+                    status="completed",
+                )
+            else:
+                promoted = PromotedBuild(
+                    build_id=paths.build_id,
+                    current_dir=catalog_target.storage_dir.parent,
+                    # Compatibility-only identity for BuildResult consumers. No catalog file is
+                    # created; PostgreSQL is the authoritative metadata catalog.
+                    catalog_path=catalog_target.storage_dir.parent / ".postgresql-catalog",
+                    storage_dir=catalog_target.storage_dir,
+                    previous_dir=None,
+                )
+                cleanup_build(paths)
+                build_logger.info(
+                    "PostgreSQL-backed DuckLake build published",
+                    event_code="shared_catalog_build_published",
+                    stage="publication",
+                    status="completed",
+                    storage=str(catalog_target.storage_dir),
+                )
         except BaseException:
             build_logger.error(
                 "Build stage failed after ingestion; raw build preserved for retry",
@@ -249,7 +282,11 @@ def build_lakehouse(
                 stage="build",
                 status="failed",
                 build_id=paths.build_id,
-                catalog=str(paths.catalog_path),
+                catalog=(
+                    catalog_target.safe_identity
+                    if catalog_target is not None
+                    else str(paths.catalog_path)
+                ),
             )
             raise
 

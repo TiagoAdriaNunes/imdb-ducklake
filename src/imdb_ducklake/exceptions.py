@@ -26,7 +26,7 @@ class ValidationError(ImdbLakehouseError):
 
 
 class NoPromotedBuildError(ImdbLakehouseError):
-    """Raised when no promoted build exists at Settings.current_dir."""
+    """Raised when the configured queryable DuckLake catalog is unavailable."""
 
 
 class LifecycleError(ImdbLakehouseError):

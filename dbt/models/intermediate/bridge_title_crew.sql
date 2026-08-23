@@ -1,3 +1,5 @@
+{{ config(materialized='table') }}
+
 select
     tconst,
     'director'::varchar as crew_role,

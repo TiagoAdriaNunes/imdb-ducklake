@@ -19,7 +19,7 @@ import duckdb
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import ImdbLakehouseError
-from imdb_ducklake.query.service import ATTACH_ALIAS, attach_sql
+from imdb_ducklake.query.service import ATTACH_ALIAS, configured_attach_sql
 
 # `winget install <id>` always lands packages under this fixed, non-machine-specific suffix
 # (the Microsoft Store publisher ID for winget-manifest installs), and appends it to the User
@@ -98,12 +98,7 @@ def _run_python_fallback(attach_sql: str, *, ui: bool) -> None:
 def main() -> None:
     ui = "--ui" in sys.argv[1:]
     settings = Settings.load()
-    catalog_path = settings.current_dir / "catalog.duckdb"
-    storage_dir = settings.current_dir / "storage"
-    if not catalog_path.is_file():
-        raise SystemExit(f"No promoted build found at {catalog_path}")
-
-    attach_sql_str = attach_sql(catalog_path, storage_dir)
+    attach_sql_str = configured_attach_sql(settings)
     executable = _find_duckdb()
     if executable:
         _run_real_cli(executable, attach_sql_str, ui=ui)

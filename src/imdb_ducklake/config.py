@@ -25,6 +25,7 @@ class Settings:
     log_level: str = "INFO"
     log_format: str = "console"
     progress_interval_seconds: float = 10.0
+    catalog_url: str | None = None
 
     @classmethod
     def load(
@@ -35,6 +36,7 @@ class Settings:
         log_level: str | None = None,
         log_format: str | None = None,
         progress_interval_seconds: float | None = None,
+        catalog_url: str | None = None,
     ) -> "Settings":
         root = find_repository_root(repository_root)
         configured_data = data_dir or Path(environ.get("IMDB_LAKEHOUSE_DATA_DIR", "data"))
@@ -64,6 +66,7 @@ class Settings:
             log_level=configured_level,
             log_format=configured_format,
             progress_interval_seconds=configured_interval,
+            catalog_url=catalog_url or environ.get("IMDB_DUCKLAKE_CATALOG_URL"),
         )
 
     @property

@@ -20,6 +20,7 @@ from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import IngestionError
 from imdb_ducklake.ingestion.progress import RichProgressCollector
 from imdb_ducklake.ingestion.resources import build_ingestion_resources
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths
 
 
@@ -30,7 +31,7 @@ class IngestionResult:
     pipeline_name: str
     dataset_name: str
     load_ids: tuple[str, ...]
-    catalog_path: Path
+    catalog_path: Path | str
     storage_dir: Path
 
 
@@ -41,6 +42,7 @@ def ingest_snapshot(
     pipelines_dir: Path,
     chunk_size: int = 5_000,
     progress: Collector | None = None,
+    catalog_target: CatalogTarget | None = None,
 ) -> IngestionResult:
     """Replace the raw schema with one complete seven-file IMDb snapshot."""
     _validate_complete_snapshot(artifacts)
@@ -48,10 +50,28 @@ def ingest_snapshot(
         raise IngestionError(f"Build workspace is not initialized: {build_paths.temporary_dir}")
     pipeline_name = _pipeline_name(build_paths.build_id)
     pipelines_dir.mkdir(parents=True, exist_ok=True)
+    target_catalog: str = (
+        catalog_target.url
+        if catalog_target is not None
+        else f"duckdb:///{build_paths.catalog_path.as_posix()}"
+    )
+    target_storage = (
+        catalog_target.storage_url
+        if catalog_target is not None
+        else build_paths.storage_dir.as_uri()
+    )
+    target_display = (
+        catalog_target.safe_identity
+        if catalog_target is not None
+        else str(build_paths.catalog_path)
+    )
+    if catalog_target is not None:
+        catalog_target.storage_dir.mkdir(parents=True, exist_ok=True)
     credentials = DuckLakeCredentials(
         ducklake_name="imdb_lake",
-        catalog=f"duckdb:///{build_paths.catalog_path.as_posix()}",
-        storage=build_paths.storage_dir.as_uri(),
+        metadata_schema=catalog_target.metadata_schema if catalog_target is not None else None,
+        catalog=target_catalog,
+        storage=target_storage,
     )
     destination = ducklake(
         credentials=credentials,
@@ -68,7 +88,7 @@ def ingest_snapshot(
         status="started",
         files=len(artifacts),
         compressed_bytes=total_bytes,
-        catalog=str(build_paths.catalog_path),
+        catalog=target_display,
     )
     for artifact in artifacts:
         ingestion_logger.info(
@@ -121,7 +141,7 @@ def ingest_snapshot(
     except Exception as error:
         detail = f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
         raise IngestionError(
-            f"dlt could not load IMDb snapshot into {build_paths.catalog_path}: {detail}"
+            f"dlt could not load IMDb snapshot into {target_display}: {detail}"
         ) from error
 
     ingestion_logger.info(
@@ -137,8 +157,10 @@ def ingest_snapshot(
         pipeline_name=pipeline_name,
         dataset_name="raw",
         load_ids=tuple(load_info.loads_ids),
-        catalog_path=build_paths.catalog_path,
-        storage_dir=build_paths.storage_dir,
+        catalog_path=target_catalog if catalog_target is not None else build_paths.catalog_path,
+        storage_dir=(
+            catalog_target.storage_dir if catalog_target is not None else build_paths.storage_dir
+        ),
     )
 
 

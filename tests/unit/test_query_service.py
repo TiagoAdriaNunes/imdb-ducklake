@@ -5,7 +5,12 @@ import pytest
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
-from imdb_ducklake.query.service import connect_readonly, get_title_cast, search_titles
+from imdb_ducklake.query.service import (
+    configured_attach_sql,
+    connect_readonly,
+    get_title_cast,
+    search_titles,
+)
 
 
 def _build_fixture_lakehouse(current_dir: Path) -> None:
@@ -120,6 +125,38 @@ def test_connect_readonly_raises_when_no_promoted_build(tmp_path: Path) -> None:
 
     with pytest.raises(NoPromotedBuildError, match="No promoted build found"):
         connect_readonly(settings)
+
+
+def test_configured_attach_sql_uses_postgresql_catalog_and_shared_storage(tmp_path: Path) -> None:
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    storage_dir = settings.lakehouse_dir / "storage"
+    storage_dir.mkdir(parents=True)
+
+    sql = configured_attach_sql(settings)
+
+    assert "ducklake:postgres:dbname=''ducklake_catalog'' host=''postgres''" in sql
+    assert "user=''imdb'' password=''secret''" in sql
+    assert f"DATA_PATH '{storage_dir.resolve().as_posix()}'" in sql
+    assert "METADATA_SCHEMA 'imdb_lake'" in sql
+    assert "OVERRIDE_DATA_PATH true, READ_ONLY" in sql
+
+
+def test_shared_catalog_missing_storage_error_does_not_expose_credentials(tmp_path: Path) -> None:
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+
+    with pytest.raises(NoPromotedBuildError) as captured:
+        configured_attach_sql(settings)
+
+    assert "postgresql://postgres:5432/ducklake_catalog#imdb_lake" in str(captured.value)
+    assert "secret" not in str(captured.value)
 
 
 def test_search_titles_filters_by_query(settings_with_fixture_build: Settings) -> None:

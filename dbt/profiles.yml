@@ -5,21 +5,26 @@ imdb_ducklake:
       type: duckdb
       path: "{{ env_var('IMDB_DUCKLAKE_DBT_CONTROLLER', '../data/.dbt/controller.duckdb') }}"
       schema: main
-      threads: 1
+      # dbt node concurrency. Keep the Docker-safe default at one because multiple analytical
+      # tests can each build large hash tables at the same time. Larger servers can override it.
+      threads: "{{ env_var('IMDB_DUCKLAKE_DBT_THREADS', '1') | int }}"
       # Deliberately no temp_directory setting: dbt-duckdb re-issues every configured `settings:`
       # key as SET on each new per-query cursor it opens against the same DuckDB instance, but
       # DuckDB rejects a repeated `SET temp_directory` (even to the same value) once any cursor
       # has actually used it, so this crashes the second time any dbt query spills to disk.
       # DuckDB's own default (a `.tmp` dir next to the database file) works fine unconfigured.
       settings:
-        threads: 4
+        # Parallelism inside each DuckDB query, independent from dbt's node concurrency.
+        threads: "{{ env_var('IMDB_DUCKLAKE_QUERY_THREADS', '2') | int }}"
         preserve_insertion_order: false
-        memory_limit: "{{ env_var('IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT', '10GB') }}"
+        memory_limit: "{{ env_var('IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT', '6GB') }}"
       extensions:
         - ducklake
+        - postgres
       attach:
         - path: "ducklake:{{ env_var('IMDB_DUCKLAKE_CATALOG', '../data/ducklake/current/catalog.duckdb') }}"
           alias: imdb_lake
           options:
             data_path: "{{ env_var('IMDB_DUCKLAKE_STORAGE', '../data/ducklake/current/storage') }}"
+            metadata_schema: "{{ env_var('IMDB_DUCKLAKE_METADATA_SCHEMA', 'main') }}"
             override_data_path: true

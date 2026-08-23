@@ -18,15 +18,30 @@ DBT_ENV := \
 # precede the subcommand, so it cannot be passed through ARGS (which is appended after it).
 ifdef LOG_FORMAT
 PIPELINE_ENV := IMDB_LAKEHOUSE_LOG_FORMAT=$(LOG_FORMAT)
+DOCKER_PIPELINE_ARGS := -e IMDB_LAKEHOUSE_LOG_FORMAT=$(LOG_FORMAT)
 endif
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
-	shell-ui clean-dlt-pipelines upload-bucket
+	shell-ui clean-dlt-pipelines upload-bucket docker-image docker-up docker-build docker-down \
+	docker-status docker-download docker-ingest docker-transform docker-validate docker-checkpoint \
+	docker-app docker-app-logs
 
 help:
 	@echo "Setup"
 	@echo "  make sync            uv sync --locked"
+	@echo "  make docker-image    build the Linux pipeline image"
+	@echo "  make docker-up       start PostgreSQL and build the Linux pipeline image"
+	@echo "  make docker-build    docker-up + run the full pipeline once (add ARGS=... as needed)"
+	@echo "  make docker-download download archives through the Linux container"
+	@echo "  make docker-ingest   ingest raw data into the PostgreSQL-backed DuckLake catalog"
+	@echo "  make docker-transform run dbt against the PostgreSQL-backed DuckLake catalog"
+	@echo "  make docker-validate validate the PostgreSQL-backed DuckLake catalog"
+	@echo "  make docker-checkpoint checkpoint the PostgreSQL-backed DuckLake catalog"
+	@echo "  make docker-app      start the Shiny app at http://localhost:8000"
+	@echo "  make docker-app-logs follow Shiny app logs"
+	@echo "  make docker-status   show PostgreSQL and one-shot pipeline containers"
+	@echo "  make docker-down     stop services without deleting PostgreSQL data"
 	@echo ""
 	@echo "Quality gates (matches .github/workflows/ci.yml)"
 	@echo "  make format-check    ruff format --check ."
@@ -35,7 +50,7 @@ help:
 	@echo "  make sql-lint        sqlfluff lint dbt/models dbt/tests"
 	@echo "  make typecheck       mypy src"
 	@echo "  make dbt-parse       dbt parse --project-dir dbt --profiles-dir dbt"
-	@echo "  make coverage        pytest -m 'not smoke' --cov=imdb_ducklake --cov-fail-under=85"
+	@echo "  make coverage        unit tests only; excludes smoke and integration"
 	@echo "  make package         uv build"
 	@echo "  make ci              format-check + lint + sql-lint + typecheck + dbt-parse + coverage"
 	@echo "                       + package"
@@ -63,6 +78,43 @@ help:
 
 sync:
 	uv sync --locked
+
+docker-image:
+	docker compose build lakehouse
+
+docker-up:
+	docker compose up -d --wait postgres
+	docker compose build lakehouse
+
+docker-build: docker-up
+	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse build $(ARGS)
+
+docker-download: docker-up
+	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse download $(ARGS)
+
+docker-ingest: docker-up
+	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse ingest $(ARGS)
+
+docker-transform: docker-up
+	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse transform $(ARGS)
+
+docker-validate: docker-up
+	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse validate $(ARGS)
+
+docker-checkpoint: docker-up
+	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse checkpoint $(ARGS)
+
+docker-app: docker-up
+	docker compose up -d app
+
+docker-app-logs:
+	docker compose logs --follow app
+
+docker-status:
+	docker compose ps -a
+
+docker-down:
+	docker compose down
 
 format:
 	uv run ruff format .
@@ -102,7 +154,7 @@ smoke:
 	uv run pytest -m smoke
 
 coverage:
-	uv run pytest -m "not smoke" --cov=imdb_ducklake --cov-fail-under=85
+	uv run pytest -m "not smoke and not integration" --cov=imdb_ducklake --cov-fail-under=85
 
 package:
 	uv build

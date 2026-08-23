@@ -1,0 +1,61 @@
+name: imdb-ducklake
+
+services:
+  postgres:
+    image: postgres:18.4-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ducklake_catalog}
+      POSTGRES_USER: ${POSTGRES_USER:-imdb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-imdb-local-dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    shm_size: 256mb
+
+  lakehouse:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: imdb-ducklake:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      IMDB_DUCKLAKE_CATALOG_URL: ${IMDB_DUCKLAKE_CATALOG_URL:-postgresql://imdb:imdb-local-dev@postgres:5432/ducklake_catalog}
+      IMDB_DUCKLAKE_DBT_THREADS: ${IMDB_DUCKLAKE_DBT_THREADS:-1}
+      IMDB_DUCKLAKE_QUERY_THREADS: ${IMDB_DUCKLAKE_QUERY_THREADS:-2}
+      IMDB_LAKEHOUSE_LOG_LEVEL: ${IMDB_LAKEHOUSE_LOG_LEVEL:-DEBUG}
+      # Docker Desktop currently exposes about 8GB. Leave headroom for Python, dbt, dlt, and WSL;
+      # exceeding the cgroup limit makes Linux SIGKILL dbt with exit code -9.
+      IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT: ${IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT:-6GB}
+    volumes:
+      - ./data:/data
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: imdb-ducklake:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["app"]
+    environment:
+      IMDB_DUCKLAKE_CATALOG_URL: ${IMDB_DUCKLAKE_CATALOG_URL:-postgresql://imdb:imdb-local-dev@postgres:5432/ducklake_catalog}
+      IMDB_DUCKLAKE_QUERY_THREADS: ${IMDB_DUCKLAKE_QUERY_THREADS:-2}
+      IMDB_DUCKLAKE_APP_PORT: 8000
+    ports:
+      - "${IMDB_DUCKLAKE_APP_PORT:-8000}:8000"
+    volumes:
+      - ./data:/data:ro
+
+volumes:
+  postgres-data:

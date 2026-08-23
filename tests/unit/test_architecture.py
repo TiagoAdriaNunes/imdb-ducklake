@@ -6,7 +6,7 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).parents[2] / "src" / "imdb_ducklake"
 
 # Dependencies point inward toward shared policy and lifecycle types. Only the application
-# orchestration and CLI composition roots may depend on every feature package.
+# application and CLI composition roots may depend on every feature package.
 ALLOWED_DEPENDENCIES = {
     "__init__": set(),
     "__main__": {"cli"},
@@ -38,7 +38,7 @@ ALLOWED_DEPENDENCIES = {
     "ingestion": {"acquisition", "datasets", "exceptions", "ingestion", "lakehouse"},
     "lakehouse": {"exceptions", "lakehouse"},
     "observability": set(),
-    "query": {"config", "exceptions"},
+    "query": {"config", "exceptions", "lakehouse"},
     "transformation": {"exceptions", "lakehouse", "transformation"},
 }
 

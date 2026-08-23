@@ -6,6 +6,7 @@ from io import StringIO
 import pytest
 
 from imdb_ducklake.exceptions import TransformationError
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths, initialize_build
 from imdb_ducklake.observability import configure_logging, start_run_context
 from imdb_ducklake.transformation.dbt_runner import run_dbt
@@ -52,6 +53,38 @@ def test_runs_dbt_with_explicit_paths_and_environment(tmp_path) -> None:
     assert environment["IMDB_DUCKLAKE_CATALOG"] == paths.catalog_path.as_posix()
     assert environment["IMDB_DUCKLAKE_STORAGE"] == paths.storage_dir.as_posix()
     assert environment["IMDB_DUCKLAKE_DBT_CONTROLLER"] == controller_path.resolve().as_posix()
+
+
+def test_runs_dbt_against_postgresql_catalog_target(tmp_path) -> None:
+    paths, project = _inputs(tmp_path)
+    target = CatalogTarget(
+        "postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+        tmp_path / "shared-storage",
+    )
+    target.storage_dir.mkdir()
+    received = None
+
+    def runner(command, cwd, environment):
+        nonlocal received
+        received = environment
+        return subprocess.CompletedProcess(command, 0, "passed", "")
+
+    run_dbt(
+        ("build",),
+        build_paths=paths,
+        project_dir=project,
+        profiles_dir=project,
+        controller_path=tmp_path / "state" / "controller.duckdb",
+        executable="dbt",
+        environment={},
+        runner=runner,
+        catalog_target=target,
+    )
+
+    assert received is not None
+    assert received["IMDB_DUCKLAKE_CATALOG"].startswith("postgres:dbname=")
+    assert received["IMDB_DUCKLAKE_STORAGE"] == target.storage_dir.as_posix()
+    assert received["IMDB_DUCKLAKE_METADATA_SCHEMA"] == "imdb_lake"
 
 
 def test_rejects_incomplete_build_and_wraps_dbt_failure(tmp_path) -> None:

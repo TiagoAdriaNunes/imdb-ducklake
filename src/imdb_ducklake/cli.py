@@ -32,10 +32,13 @@ from imdb_ducklake.exceptions import (
 )
 from imdb_ducklake.ingestion.pipeline import ingest_snapshot
 from imdb_ducklake.ingestion.progress import RichProgressCollector, StructuredLogCollector
+from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import (
     BuildLock,
     BuildPaths,
+    checkpoint_catalog_target,
     checkpoint_lakehouse,
+    cleanup_build,
     list_staged_builds,
     promote_build,
     prune_obsolete_builds,
@@ -117,7 +120,7 @@ def build_command(
         ),
     ] = None,
 ) -> None:
-    """Build, validate, and atomically promote a complete IMDb lakehouse."""
+    """Build and validate a complete IMDb lakehouse."""
     try:
         settings = _settings_for_command(ctx, data_dir=data_dir)
         timeout = httpx.Timeout(connect=30, read=120, write=30, pool=30)
@@ -135,8 +138,9 @@ def build_command(
                 force_download=force_download,
                 progress_factory=lambda build_id: _progress_collector(settings, build_id),
             )
+        action = "Published" if settings.catalog_url is not None else "Promoted"
         typer.echo(
-            f"Promoted build {result.build_id} to {result.promoted.current_dir} "
+            f"{action} build {result.build_id} to {result.promoted.current_dir} "
             f"after validating {result.validation.relation_count} relations."
         )
     except ImdbLakehouseError as error:
@@ -201,7 +205,7 @@ def ingest_command(
         ),
     ] = None,
 ) -> None:
-    """Load retained verified archives into an isolated raw DuckLake build."""
+    """Load verified archives into a staged or configured shared DuckLake catalog."""
     try:
         settings = _settings_for_command(ctx, data_dir=data_dir)
         artifacts = load_verified_artifacts(
@@ -210,29 +214,46 @@ def ingest_command(
             manifest_path=settings.manifest_path,
         )
         paths = BuildPaths.create(settings.lakehouse_dir)
+        catalog_target = _catalog_target(settings)
         with BuildLock(paths.lock_path):
-            recover_interrupted_promotion(settings.lakehouse_dir)
-            staged = list_staged_builds(settings.lakehouse_dir)
-            if staged and not replace_staged:
-                staged_ids = ", ".join(build.build_id for build in staged)
-                raise LifecycleError(
-                    "A staged build already exists. Run transform first or pass "
-                    f"--replace-staged to discard it: {staged_ids}"
-                )
-            if replace_staged:
-                prune_obsolete_builds(settings.lakehouse_dir)
+            if catalog_target is None:
+                recover_interrupted_promotion(settings.lakehouse_dir)
+                staged = list_staged_builds(settings.lakehouse_dir)
+                if staged and not replace_staged:
+                    staged_ids = ", ".join(build.build_id for build in staged)
+                    raise LifecycleError(
+                        "A staged build already exists. Run transform first or pass "
+                        f"--replace-staged to discard it: {staged_ids}"
+                    )
+                if replace_staged:
+                    prune_obsolete_builds(settings.lakehouse_dir)
             with temporary_build(paths):
-                result = ingest_snapshot(
-                    artifacts,
-                    build_paths=paths,
-                    pipelines_dir=settings.dlt_pipelines_dir,
-                    progress=_progress_collector(settings, paths.build_id),
-                )
+                if catalog_target is None:
+                    result = ingest_snapshot(
+                        artifacts,
+                        build_paths=paths,
+                        pipelines_dir=settings.dlt_pipelines_dir,
+                        progress=_progress_collector(settings, paths.build_id),
+                    )
+                else:
+                    result = ingest_snapshot(
+                        artifacts,
+                        build_paths=paths,
+                        pipelines_dir=settings.dlt_pipelines_dir,
+                        progress=_progress_collector(settings, paths.build_id),
+                        catalog_target=catalog_target,
+                    )
+            if catalog_target is not None:
+                cleanup_build(paths)
         typer.echo(
             f"Loaded {len(artifacts)} archives into build {paths.build_id} "
             f"({len(result.load_ids)} dlt load(s))."
         )
-        typer.echo(f"Catalog: {result.catalog_path}")
+        typer.echo(
+            f"Catalog: {catalog_target.safe_identity}"
+            if catalog_target is not None
+            else f"Catalog: {result.catalog_path}"
+        )
     except ImdbLakehouseError as error:
         _exit_with_error(error)
 
@@ -254,12 +275,16 @@ def transform_command(
         ),
     ] = None,
 ) -> None:
-    """Run all dbt models and tests against one staged DuckLake build."""
+    """Run dbt against a staged build or the configured shared DuckLake catalog."""
     try:
         settings = _settings_for_command(ctx, data_dir=data_dir)
+        catalog_target = _catalog_target(settings)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
-            recover_interrupted_promotion(settings.lakehouse_dir)
-            paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+            if catalog_target is None:
+                recover_interrupted_promotion(settings.lakehouse_dir)
+                paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+            else:
+                paths = BuildPaths.create(settings.lakehouse_dir, build_id=build_id)
             run_dbt(
                 ("build",),
                 build_paths=paths,
@@ -268,8 +293,15 @@ def transform_command(
                 controller_path=settings.dbt_state_dir / f"{paths.build_id}.duckdb",
                 executable=str(_dbt_executable()),
                 environment=environ,
+                catalog_target=catalog_target,
             )
-        typer.echo(f"Transformed and tested build {paths.build_id}; it remains unpromoted.")
+        if catalog_target is None:
+            typer.echo(f"Transformed and tested build {paths.build_id}; it remains unpromoted.")
+        else:
+            typer.echo(
+                "Transformed and tested the PostgreSQL-backed DuckLake catalog "
+                f"{catalog_target.safe_identity}."
+            )
     except ImdbLakehouseError as error:
         _exit_with_error(error)
 
@@ -359,33 +391,46 @@ def validate_command(
         ),
     ] = None,
 ) -> None:
-    """Validate the current build, or the sole staged build when no current exists."""
+    """Validate the configured shared catalog, current build, or sole staged build."""
     try:
         settings = _settings_for_command(ctx, data_dir=data_dir)
+        catalog_target = _catalog_target(settings)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
-            recover_interrupted_promotion(settings.lakehouse_dir)
-            if build_id is not None:
+            if catalog_target is not None:
+                paths = BuildPaths.create(settings.lakehouse_dir, build_id=build_id)
+                result = validate_build(
+                    paths,
+                    executable=python_executable,
+                    environment=environ,
+                    working_directory=settings.repository_root,
+                    catalog_target=catalog_target,
+                )
+            elif build_id is not None:
+                recover_interrupted_promotion(settings.lakehouse_dir)
                 paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
                 catalog_path = paths.catalog_path
                 storage_dir = paths.storage_dir
                 selected_id = paths.build_id
             elif settings.current_dir.exists():
+                recover_interrupted_promotion(settings.lakehouse_dir)
                 catalog_path = settings.current_dir / "catalog.duckdb"
                 storage_dir = settings.current_dir / "storage"
                 selected_id = "current"
             else:
+                recover_interrupted_promotion(settings.lakehouse_dir)
                 paths = select_staged_build(settings.lakehouse_dir)
                 catalog_path = paths.catalog_path
                 storage_dir = paths.storage_dir
                 selected_id = paths.build_id
-            result = validate_catalog(
-                catalog_path=catalog_path,
-                storage_dir=storage_dir,
-                build_id=selected_id,
-                executable=python_executable,
-                environment=environ,
-                working_directory=settings.repository_root,
-            )
+            if catalog_target is None:
+                result = validate_catalog(
+                    catalog_path=catalog_path,
+                    storage_dir=storage_dir,
+                    build_id=selected_id,
+                    executable=python_executable,
+                    environment=environ,
+                    working_directory=settings.repository_root,
+                )
         typer.echo(f"Validated {result.build_id}: {result.relation_count} required relations.")
         for relation, row_count in sorted(result.mart_row_counts.items()):
             typer.echo(f"  marts.{relation}: {row_count:,} rows")
@@ -406,20 +451,28 @@ def checkpoint_command(
         ),
     ] = None,
 ) -> None:
-    """Checkpoint and compact the active current DuckLake build."""
+    """Checkpoint the configured shared catalog or active current DuckLake build."""
     started = monotonic()
     checkpoint_logger = logger
     try:
         settings = _settings_for_command(ctx, data_dir=data_dir)
+        catalog_target = _catalog_target(settings)
         catalog_path = settings.current_dir / "catalog.duckdb"
-        storage_dir = settings.current_dir / "storage"
+        storage_dir = (
+            catalog_target.storage_dir
+            if catalog_target is not None
+            else settings.current_dir / "storage"
+        )
         checkpoint_logger = logger.bind(
-            target="current",
-            catalog=str(catalog_path),
+            target="shared" if catalog_target is not None else "current",
+            catalog=(
+                catalog_target.safe_identity if catalog_target is not None else str(catalog_path)
+            ),
         )
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
-            recover_interrupted_promotion(settings.lakehouse_dir)
-            if not catalog_path.is_file():
+            if catalog_target is None:
+                recover_interrupted_promotion(settings.lakehouse_dir)
+            if catalog_target is None and not catalog_path.is_file():
                 raise LifecycleError(f"Current DuckLake catalog does not exist: {catalog_path}")
             if not storage_dir.is_dir():
                 raise LifecycleError(f"Current DuckLake storage does not exist: {storage_dir}")
@@ -429,7 +482,10 @@ def checkpoint_command(
                 stage="checkpoint",
                 status="started",
             )
-            checkpoint_lakehouse(catalog_path, storage_dir)
+            if catalog_target is None:
+                checkpoint_lakehouse(catalog_path, storage_dir)
+            else:
+                checkpoint_catalog_target(catalog_target)
         elapsed_seconds = round(monotonic() - started, 2)
         checkpoint_logger.info(
             "Checkpoint completed",
@@ -438,7 +494,12 @@ def checkpoint_command(
             status="completed",
             elapsed_seconds=elapsed_seconds,
         )
-        typer.echo(f"Checkpointed current lakehouse in {elapsed_seconds:.2f} seconds.")
+        target_label = (
+            "shared PostgreSQL-backed lakehouse"
+            if catalog_target is not None
+            else "current lakehouse"
+        )
+        typer.echo(f"Checkpointed {target_label} in {elapsed_seconds:.2f} seconds.")
     except ImdbLakehouseError as error:
         checkpoint_logger.error(
             "Checkpoint failed",
@@ -478,6 +539,12 @@ def _progress_collector(settings: Settings, build_id: str) -> Collector:
         build_id=build_id,
         log_period=settings.progress_interval_seconds,
     )
+
+
+def _catalog_target(settings: Settings) -> CatalogTarget | None:
+    if settings.catalog_url is None:
+        return None
+    return CatalogTarget(settings.catalog_url, settings.lakehouse_dir / "storage")
 
 
 def _exit_code_for(error: ImdbLakehouseError) -> ExitCode:
