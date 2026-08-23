@@ -78,6 +78,11 @@ def ingest_snapshot(
         credentials=credentials,
         destination_name="imdb_lake",
         local_dir=str(build_paths.temporary_dir),
+        # Every build attaches at a fresh builds/<id>/storage - never the path the catalog last
+        # recorded (whatever the previous build's promoted current/storage was) - so DuckLake
+        # rejects the attach outright without this. Every other attach point in this codebase
+        # (checkpoint, validation, query/service.py, dbt/profiles.yml) already sets it.
+        override_data_path=True,
     )
     schema = Schema("raw", normalizers={"names": "direct"})
     resources = build_ingestion_resources(artifacts, chunk_size=chunk_size)

@@ -38,7 +38,6 @@ from imdb_ducklake.lakehouse.lifecycle import (
     BuildPaths,
     checkpoint_catalog_target,
     checkpoint_lakehouse,
-    cleanup_build,
     list_staged_builds,
     promote_build,
     prune_obsolete_builds,
@@ -214,19 +213,22 @@ def ingest_command(
             manifest_path=settings.manifest_path,
         )
         paths = BuildPaths.create(settings.lakehouse_dir)
-        catalog_target = _catalog_target(settings)
+        catalog_target = (
+            CatalogTarget(settings.catalog_url, paths.storage_dir)
+            if settings.catalog_url is not None
+            else None
+        )
         with BuildLock(paths.lock_path):
-            if catalog_target is None:
-                recover_interrupted_promotion(settings.lakehouse_dir)
-                staged = list_staged_builds(settings.lakehouse_dir)
-                if staged and not replace_staged:
-                    staged_ids = ", ".join(build.build_id for build in staged)
-                    raise LifecycleError(
-                        "A staged build already exists. Run transform first or pass "
-                        f"--replace-staged to discard it: {staged_ids}"
-                    )
-                if replace_staged:
-                    prune_obsolete_builds(settings.lakehouse_dir)
+            recover_interrupted_promotion(settings.lakehouse_dir)
+            staged = list_staged_builds(settings.lakehouse_dir)
+            if staged and not replace_staged:
+                staged_ids = ", ".join(build.build_id for build in staged)
+                raise LifecycleError(
+                    "A staged build already exists. Run transform first or pass "
+                    f"--replace-staged to discard it: {staged_ids}"
+                )
+            if replace_staged:
+                prune_obsolete_builds(settings.lakehouse_dir)
             with temporary_build(paths):
                 if catalog_target is None:
                     result = ingest_snapshot(
@@ -247,8 +249,6 @@ def ingest_command(
                         workers=settings.ingest_workers,
                         chunk_size=settings.ingest_chunk_size,
                     )
-            if catalog_target is not None:
-                cleanup_build(paths)
         typer.echo(
             f"Loaded {len(artifacts)} archives into build {paths.build_id} "
             f"({len(result.load_ids)} dlt load(s))."
@@ -279,16 +279,17 @@ def transform_command(
         ),
     ] = None,
 ) -> None:
-    """Run dbt against a staged build or the configured shared DuckLake catalog."""
+    """Run dbt against a staged build, PostgreSQL-backed or not."""
     try:
         settings = _settings_for_command(ctx, data_dir=data_dir)
-        catalog_target = _catalog_target(settings)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
-            if catalog_target is None:
-                recover_interrupted_promotion(settings.lakehouse_dir)
-                paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
-            else:
-                paths = BuildPaths.create(settings.lakehouse_dir, build_id=build_id)
+            recover_interrupted_promotion(settings.lakehouse_dir)
+            paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+            catalog_target = (
+                CatalogTarget(settings.catalog_url, paths.storage_dir)
+                if settings.catalog_url is not None
+                else None
+            )
             run_dbt(
                 ("build",),
                 build_paths=paths,
@@ -487,9 +488,9 @@ def checkpoint_command(
                 status="started",
             )
             if catalog_target is None:
-                checkpoint_lakehouse(catalog_path, storage_dir)
+                removed_files = checkpoint_lakehouse(catalog_path, storage_dir)
             else:
-                checkpoint_catalog_target(catalog_target)
+                removed_files = checkpoint_catalog_target(catalog_target)
         elapsed_seconds = round(monotonic() - started, 2)
         checkpoint_logger.info(
             "Checkpoint completed",
@@ -497,6 +498,7 @@ def checkpoint_command(
             stage="checkpoint",
             status="completed",
             elapsed_seconds=elapsed_seconds,
+            orphaned_files_removed=len(removed_files),
         )
         target_label = (
             "shared PostgreSQL-backed lakehouse"
@@ -504,6 +506,10 @@ def checkpoint_command(
             else "current lakehouse"
         )
         typer.echo(f"Checkpointed {target_label} in {elapsed_seconds:.2f} seconds.")
+        if removed_files:
+            typer.echo(
+                f"Removed {len(removed_files)} orphaned data file(s) never committed by a snapshot."
+            )
     except ImdbLakehouseError as error:
         checkpoint_logger.error(
             "Checkpoint failed",
@@ -546,9 +552,15 @@ def _progress_collector(settings: Settings, build_id: str) -> Collector:
 
 
 def _catalog_target(settings: Settings) -> CatalogTarget | None:
+    """Read-oriented CatalogTarget for validate/checkpoint: always the promoted current/storage.
+
+    A build's own write-time CatalogTarget is constructed separately against its isolated
+    builds/<id>/storage staging directory (see build_lakehouse, ingest_command) and never through
+    this helper.
+    """
     if settings.catalog_url is None:
         return None
-    return CatalogTarget(settings.catalog_url, settings.lakehouse_dir / "storage")
+    return CatalogTarget(settings.catalog_url, settings.current_dir / "storage")
 
 
 def _exit_code_for(error: ImdbLakehouseError) -> ExitCode:

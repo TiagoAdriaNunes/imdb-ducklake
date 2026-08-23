@@ -133,7 +133,7 @@ def test_configured_attach_sql_uses_postgresql_catalog_and_shared_storage(tmp_pa
         data_dir=tmp_path / "data",
         catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
     )
-    storage_dir = settings.lakehouse_dir / "storage"
+    storage_dir = settings.current_dir / "storage"
     storage_dir.mkdir(parents=True)
 
     sql = configured_attach_sql(settings)

@@ -213,6 +213,27 @@ def test_promotes_new_build_and_preserves_previous_build(tmp_path) -> None:
     assert (promoted.previous_dir / "catalog.duckdb").read_text(encoding="utf-8") == "old"
 
 
+def test_promotes_postgresql_backed_build_without_a_local_catalog_file(tmp_path) -> None:
+    """A PostgreSQL-backed build has no local catalog.duckdb - metadata lives in PostgreSQL - but
+    still stages Parquet into an isolated builds/<id>/storage that must be atomically promoted
+    into current/storage exactly like a local build, rather than written directly into a
+    permanent shared directory."""
+    paths = _paths(tmp_path)
+    initialize_build(paths)
+    (paths.storage_dir / "data.parquet").write_text("staged", encoding="utf-8")
+    assert not paths.catalog_path.exists()
+
+    with pytest.raises(PromotionError, match="DuckLake catalog does not exist"):
+        promote_build(paths)
+
+    promoted = promote_build(paths, require_catalog_file=False)
+
+    assert promoted.current_dir == paths.current_dir
+    assert (promoted.storage_dir / "data.parquet").read_text(encoding="utf-8") == "staged"
+    assert not promoted.catalog_path.exists()
+    assert not paths.temporary_dir.exists()
+
+
 def test_promotion_failure_rolls_previous_build_back(tmp_path, monkeypatch) -> None:
     root = tmp_path / "ducklake"
     current = root / "current"

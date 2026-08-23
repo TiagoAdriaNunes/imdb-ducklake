@@ -26,6 +26,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     BuildPaths,
     PromotedBuild,
     SpaceBudget,
+    checkpoint_catalog_target,
     checkpoint_lakehouse,
     cleanup_build,
     ensure_free_space,
@@ -78,7 +79,7 @@ def build_lakehouse(
     started = time.monotonic()
     paths = BuildPaths.create(settings.lakehouse_dir)
     catalog_target = (
-        CatalogTarget(settings.catalog_url, settings.lakehouse_dir / "storage")
+        CatalogTarget(settings.catalog_url, paths.storage_dir)
         if settings.catalog_url is not None
         else None
     )
@@ -98,8 +99,7 @@ def build_lakehouse(
             stage="lifecycle",
             status="completed",
         )
-        if catalog_target is None:
-            recover_interrupted_promotion(settings.lakehouse_dir)
+        recover_interrupted_promotion(settings.lakehouse_dir)
         _check_space(
             settings,
             raw_bytes=_directory_size(settings.raw_dir),
@@ -138,11 +138,7 @@ def build_lakehouse(
             temporary_size_factor=temporary_size_factor,
             log=build_logger,
         )
-        removed = (
-            prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
-            if catalog_target is None
-            else ()
-        )
+        removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
         if removed:
             build_logger.info(
                 "Obsolete builds pruned",
@@ -236,48 +232,41 @@ def build_lakehouse(
                 mart_row_counts=validation.mart_row_counts,
             )
 
-            if catalog_target is None:
-                build_logger.info(
-                    "Promotion started",
-                    event_code="promotion_started",
-                    stage="promotion",
-                    status="started",
-                )
-                promoted = promote_build(paths)
-                build_logger.info(
-                    "Promotion completed",
-                    event_code="promotion_completed",
-                    stage="promotion",
-                    status="completed",
-                    current=str(promoted.current_dir),
-                )
+            build_logger.info(
+                "Promotion started",
+                event_code="promotion_started",
+                stage="promotion",
+                status="started",
+            )
+            promoted = promote_build(paths, require_catalog_file=catalog_target is None)
+            build_logger.info(
+                "Promotion completed",
+                event_code="promotion_completed",
+                stage="promotion",
+                status="completed",
+                current=str(promoted.current_dir),
+            )
 
+            if catalog_target is None:
                 checkpoint_lakehouse(promoted.catalog_path, promoted.storage_dir)
-                build_logger.info(
-                    "Checkpoint completed",
-                    event_code="checkpoint_completed",
-                    stage="checkpoint",
-                    status="completed",
-                )
             else:
-                promoted = PromotedBuild(
-                    build_id=paths.build_id,
-                    current_dir=catalog_target.storage_dir.parent,
-                    # Compatibility-only identity for BuildResult consumers. No catalog file is
-                    # created; PostgreSQL is the authoritative metadata catalog.
-                    catalog_path=catalog_target.storage_dir.parent / ".postgresql-catalog",
-                    storage_dir=catalog_target.storage_dir,
-                    previous_dir=None,
+                checkpoint_catalog_target(
+                    CatalogTarget(
+                        catalog_target.url, promoted.storage_dir, catalog_target.metadata_schema
+                    )
                 )
-                cleanup_build(paths)
-                build_logger.info(
-                    "PostgreSQL-backed DuckLake build published",
-                    event_code="shared_catalog_build_published",
-                    stage="publication",
-                    status="completed",
-                    storage=str(catalog_target.storage_dir),
-                )
+            build_logger.info(
+                "Checkpoint completed",
+                event_code="checkpoint_completed",
+                stage="checkpoint",
+                status="completed",
+            )
         except BaseException:
+            # A later failure must not discard the already-ingested raw build: retrying
+            # acquisition and ingestion just to re-test a dbt fix wastes real time when the raw
+            # archives never changed. Every build - local or PostgreSQL-backed - stages into its
+            # own builds/<id>/, untouched by anything else, so leaving it in place on failure is
+            # safe in both modes; nothing reads it until a later promotion succeeds.
             build_logger.error(
                 "Build stage failed after ingestion; raw build preserved for retry",
                 event_code="post_ingestion_stage_failed",
