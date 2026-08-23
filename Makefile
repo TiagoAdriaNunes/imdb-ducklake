@@ -91,7 +91,7 @@ help:
 	@echo "  make docker-shell    same, attached to the PostgreSQL-backed catalog (needs docker-up)"
 	@echo "  make docker-shell-ui same, and opens DuckDB's local web UI in your browser"
 	@echo "  make clean-dlt-pipelines  delete old dlt working dirs, keep the newest KEEP=3"
-	@echo "  make upload-bucket   hf sync data/ducklake/current to \$$HF_BUCKET (required, e.g. hf://buckets/<you>/<name>)"
+	@echo "  make upload-bucket   hf sync data/ducklake/current/storage, marts/ only, prefix kept (app-required data, correct DATA_PATH layout) to \$$HF_BUCKET (required, e.g. hf://buckets/<you>/<name>)"
 
 sync:
 	uv sync --locked
@@ -231,4 +231,4 @@ clean-dlt-pipelines:
 
 upload-bucket:
 	@test -n "$(HF_BUCKET)" || { echo "set HF_BUCKET, e.g. HF_BUCKET=hf://buckets/<you>/<name> make upload-bucket"; exit 1; }
-	hf sync ./data/ducklake/current $(HF_BUCKET) $(ARGS)
+	hf sync ./data/ducklake/current/storage $(HF_BUCKET) --include 'marts/*' $(ARGS)

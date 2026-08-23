@@ -115,7 +115,12 @@ def ensure_free_space(path: Path, budget: SpaceBudget) -> int:
 
 
 def initialize_build(paths: BuildPaths) -> None:
-    """Create a new isolated build directory and its local storage directory."""
+    """Create a new isolated build directory and its local storage directory.
+
+    Every build - local or PostgreSQL-backed - stages its Parquet writes into
+    ``builds/<id>/storage`` and only reaches ``current/storage`` through an atomic
+    ``promote_build``. Nothing writes into a shared storage directory directly.
+    """
     _validate_owned_build_path(paths)
     try:
         paths.temporary_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -175,10 +180,18 @@ def promote_build(
     paths: BuildPaths,
     *,
     token_factory: TokenFactory | None = None,
+    require_catalog_file: bool = True,
 ) -> PromotedBuild:
-    """Promote a validated build, rolling the previous current build back on failure."""
+    """Promote a validated build, rolling the previous current build back on failure.
+
+    ``require_catalog_file=False`` promotes a PostgreSQL-backed build, which has no local
+    ``catalog.duckdb`` (metadata lives in PostgreSQL) but still writes Parquet into an isolated
+    ``builds/<id>/storage`` that must be atomically swapped into ``current/storage`` exactly like
+    a local build, rather than written directly into a permanent shared directory (see ADR 0010's
+    original "no promotion step" design and its follow-up amendment).
+    """
     recover_interrupted_promotion(paths.lakehouse_dir)
-    _validate_promotable_layout(paths)
+    _validate_promotable_layout(paths, require_catalog_file=require_catalog_file)
     current_dir = paths.current_dir
     retired_dir: Path | None = None
     moved_previous = False
@@ -222,18 +235,26 @@ def promote_build(
     )
 
 
-def checkpoint_lakehouse(catalog_path: Path, storage_dir: Path) -> None:
-    """Run DuckLake's CHECKPOINT to expire snapshots and compact small files."""
-    _checkpoint_catalog(
+def checkpoint_lakehouse(catalog_path: Path, storage_dir: Path) -> tuple[str, ...]:
+    """Run DuckLake's CHECKPOINT, then delete any uncommitted crash-orphaned data files."""
+    return _checkpoint_catalog(
         metadata_path=catalog_path.resolve().as_posix(),
         storage_dir=storage_dir,
         metadata_schema="main",
     )
 
 
-def checkpoint_catalog_target(target: CatalogTarget) -> None:
-    """Checkpoint a DuckLake catalog whose metadata is stored in PostgreSQL."""
-    _checkpoint_catalog(
+def checkpoint_catalog_target(target: CatalogTarget) -> tuple[str, ...]:
+    """Checkpoint a DuckLake catalog whose metadata is stored in PostgreSQL, then delete any
+    uncommitted crash-orphaned data files.
+
+    Ingestion and dbt write directly into the shared storage tree in this mode (no per-build
+    staging directory to discard on failure, see ADR 0010), so a killed writer can leave Parquet
+    files on disk that no committed DuckLake snapshot ever referenced.
+    ``ducklake_delete_orphaned_files`` asks the catalog itself which files those are rather than
+    inferring it from paths/names.
+    """
+    return _checkpoint_catalog(
         metadata_path=target.duckdb_metadata_path,
         storage_dir=target.storage_dir,
         metadata_schema=target.metadata_schema,
@@ -245,7 +266,7 @@ def _checkpoint_catalog(
     metadata_path: str,
     storage_dir: Path,
     metadata_schema: str,
-) -> None:
+) -> tuple[str, ...]:
     import duckdb
 
     connection = duckdb.connect(":memory:")
@@ -260,6 +281,10 @@ def _checkpoint_catalog(
         )
         connection.execute("USE imdb_lake")
         connection.execute("CHECKPOINT")
+        removed = connection.execute(
+            "CALL ducklake_delete_orphaned_files('imdb_lake', dry_run => false)"
+        ).fetchall()
+        return tuple(row[0] for row in removed)
     except Exception as error:
         raise LifecycleError(
             f"Could not checkpoint the DuckLake catalog: {type(error).__name__}: {error}"
@@ -507,11 +532,11 @@ def _validate_owned_build_path(paths: BuildPaths) -> None:
         raise LifecycleError(f"Unsafe temporary build path: {paths.temporary_dir}")
 
 
-def _validate_promotable_layout(paths: BuildPaths) -> None:
+def _validate_promotable_layout(paths: BuildPaths, *, require_catalog_file: bool = True) -> None:
     _validate_owned_build_path(paths)
     if not paths.temporary_dir.is_dir():
         raise PromotionError(f"Build directory does not exist: {paths.temporary_dir}")
-    if not paths.catalog_path.is_file():
+    if require_catalog_file and not paths.catalog_path.is_file():
         raise PromotionError(f"DuckLake catalog does not exist: {paths.catalog_path}")
     if not paths.storage_dir.is_dir():
         raise PromotionError(f"DuckLake storage does not exist: {paths.storage_dir}")

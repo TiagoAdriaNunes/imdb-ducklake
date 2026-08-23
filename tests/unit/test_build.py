@@ -140,7 +140,11 @@ def test_build_id_correlates_every_stage_including_acquisition(tmp_path, monkeyp
     assert "free_space_gate_passed" in event_codes
 
 
-def test_postgresql_build_bypasses_file_promotion_and_checkpoint(tmp_path, monkeypatch) -> None:
+def test_postgresql_build_stages_writes_and_promotes_to_current(tmp_path, monkeypatch) -> None:
+    """A PostgreSQL-backed build has no local catalog.duckdb (metadata lives in PostgreSQL), but
+    it must still stage every write into an isolated builds/<id>/storage and only reach
+    current/storage through the same atomic promote_build local builds use - never write directly
+    into a permanent shared directory (ADR 0010's follow-up amendment)."""
     base = _settings(tmp_path)
     settings = Settings(
         repository_root=base.repository_root,
@@ -153,8 +157,9 @@ def test_postgresql_build_bypasses_file_promotion_and_checkpoint(tmp_path, monke
     def ingest(
         artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
     ):
-        catalog_target.storage_dir.mkdir(parents=True, exist_ok=True)
         calls["ingestion_target"] = catalog_target
+        assert catalog_target.storage_dir == build_paths.storage_dir
+        (catalog_target.storage_dir / "raw.parquet").write_text("raw", encoding="utf-8")
         return IngestionResult(
             "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir
         )
@@ -167,18 +172,19 @@ def test_postgresql_build_bypasses_file_promotion_and_checkpoint(tmp_path, monke
         calls["validation_target"] = catalog_target
         return ValidationResult(paths.build_id, 31, {"mart": 1})
 
+    checkpoint_calls: list = []
     monkeypatch.setattr(build_module, "ingest_snapshot", ingest)
     monkeypatch.setattr(build_module, "run_dbt", transform)
     monkeypatch.setattr(build_module, "validate_build", validate)
     monkeypatch.setattr(
         build_module,
-        "promote_build",
-        lambda *_a, **_kw: pytest.fail("file promotion must not run"),
+        "checkpoint_lakehouse",
+        lambda *_a, **_kw: pytest.fail("local checkpoint must not run"),
     )
     monkeypatch.setattr(
         build_module,
-        "checkpoint_lakehouse",
-        lambda *_a, **_kw: pytest.fail("file checkpoint must not run"),
+        "checkpoint_catalog_target",
+        lambda target: checkpoint_calls.append(target) or (),
     )
 
     result = build_lakehouse(
@@ -190,10 +196,64 @@ def test_postgresql_build_bypasses_file_promotion_and_checkpoint(tmp_path, monke
         reserve_bytes=0,
     )
 
-    assert calls["ingestion_target"] == calls["dbt_target"]
-    assert calls["dbt_target"] == calls["validation_target"]
-    assert result.promoted.storage_dir == settings.lakehouse_dir / "storage"
+    staged_storage_dir = calls["ingestion_target"].storage_dir
+    assert calls["ingestion_target"] == calls["dbt_target"] == calls["validation_target"]
+    assert staged_storage_dir == settings.lakehouse_dir / "builds" / result.build_id / "storage"
+
+    # Promotion moved the staged directory into current/storage; nothing was ever written
+    # directly into a shared, permanent location.
+    assert result.promoted.storage_dir == settings.current_dir / "storage"
+    assert (result.promoted.storage_dir / "raw.parquet").read_text(encoding="utf-8") == "raw"
+    assert not list((settings.lakehouse_dir / "builds").glob("*"))
     assert not list(settings.data_dir.rglob("catalog.duckdb"))
+
+    assert len(checkpoint_calls) == 1
+    assert checkpoint_calls[0].url == settings.catalog_url
+    assert checkpoint_calls[0].storage_dir == result.promoted.storage_dir
+
+
+def test_postgresql_build_failure_leaves_staged_build_for_retry(tmp_path, monkeypatch) -> None:
+    """Unlike the old shared-storage design, a PostgreSQL-mode build now stages into its own
+    builds/<id>/, untouched by anything else - so a post-ingestion failure can leave it in place
+    for inspection/retry exactly like local mode already does, instead of needing crash-orphan
+    cleanup or workspace deletion."""
+    base = _settings(tmp_path)
+    settings = Settings(
+        repository_root=base.repository_root,
+        data_dir=base.data_dir,
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    downloader = FakeDownloader()
+
+    def ingest(
+        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
+    ):
+        (catalog_target.storage_dir / "raw.parquet").write_text("raw", encoding="utf-8")
+        return IngestionResult(
+            "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir
+        )
+
+    monkeypatch.setattr(build_module, "ingest_snapshot", ingest)
+    monkeypatch.setattr(
+        build_module,
+        "run_dbt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TransformationError("failed dbt")),
+    )
+
+    with pytest.raises(TransformationError):
+        build_lakehouse(
+            settings=settings,
+            downloader=downloader,
+            dbt_executable="dbt",
+            python_executable="python",
+            environment={},
+            reserve_bytes=0,
+        )
+
+    staged = list((settings.lakehouse_dir / "builds").glob("*"))
+    assert len(staged) == 1
+    assert (staged[0] / "storage" / "raw.parquet").read_text(encoding="utf-8") == "raw"
+    assert not settings.current_dir.exists()
 
 
 @pytest.mark.parametrize("stage", ["acquisition", "ingestion", "dbt", "validation", "promotion"])

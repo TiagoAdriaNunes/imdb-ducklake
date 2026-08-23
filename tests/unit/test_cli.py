@@ -217,10 +217,13 @@ def test_ingest_command_uses_shared_catalog_when_configured(tmp_path, monkeypatc
 
     assert result.exit_code == 0
     assert received is not None
-    assert received["catalog_target"].storage_dir == settings.lakehouse_dir / "storage"
+    assert received["catalog_target"].storage_dir == received["build_paths"].storage_dir
+    assert received["catalog_target"].storage_dir.is_dir()
     assert "postgresql://postgres:5432/ducklake_catalog#imdb_lake" in result.stdout
     assert "secret" not in result.stdout
-    assert not received["build_paths"].temporary_dir.exists()
+    # Ingest only stages, exactly like local mode - a later transform/build promotes it.
+    assert received["build_paths"].temporary_dir.exists()
+    assert not settings.current_dir.exists()
 
 
 def test_transform_command_runs_dbt_for_staged_build(tmp_path, monkeypatch) -> None:
@@ -251,8 +254,10 @@ def test_transform_command_uses_shared_catalog_when_configured(tmp_path, monkeyp
         data_dir=tmp_path / "data",
         catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
     )
-    (settings.lakehouse_dir / "storage").mkdir(parents=True)
+    paths = BuildPaths.create(settings.lakehouse_dir, build_id="shared-run")
+    initialize_build(paths)
     monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    monkeypatch.setattr(cli, "select_staged_build", lambda *_args, **_kwargs: paths)
     received = None
 
     def fake_run(dbt_args, **kwargs):
@@ -268,7 +273,8 @@ def test_transform_command_uses_shared_catalog_when_configured(tmp_path, monkeyp
     assert result.exit_code == 0
     assert received is not None
     assert received["build_paths"].build_id == "shared-run"
-    assert received["catalog_target"].storage_dir == settings.lakehouse_dir / "storage"
+    # dbt attaches at this build's own isolated staging directory, never a shared/live path.
+    assert received["catalog_target"].storage_dir == paths.storage_dir
     assert "PostgreSQL-backed DuckLake catalog" in result.stdout
 
 
@@ -441,11 +447,12 @@ def test_checkpoint_command_uses_current_build_lock_and_structured_logs(
             events.append((message, fields))
 
     monkeypatch.setattr(cli, "logger", FakeLogger())
-    monkeypatch.setattr(
-        cli,
-        "checkpoint_lakehouse",
-        lambda catalog, storage: received.append((catalog, storage)),
-    )
+
+    def fake_checkpoint_lakehouse(catalog, storage):
+        received.append((catalog, storage))
+        return ()
+
+    monkeypatch.setattr(cli, "checkpoint_lakehouse", fake_checkpoint_lakehouse)
 
     result = runner.invoke(cli.app, ["checkpoint"])
 
@@ -495,10 +502,15 @@ def test_checkpoint_command_uses_shared_catalog_when_configured(tmp_path, monkey
         data_dir=tmp_path / "data",
         catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
     )
-    (settings.lakehouse_dir / "storage").mkdir(parents=True)
+    (settings.current_dir / "storage").mkdir(parents=True)
     monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
     received = []
-    monkeypatch.setattr(cli, "checkpoint_catalog_target", received.append)
+
+    def fake_checkpoint_catalog_target(target):
+        received.append(target)
+        return ()
+
+    monkeypatch.setattr(cli, "checkpoint_catalog_target", fake_checkpoint_catalog_target)
 
     result = runner.invoke(cli.app, ["checkpoint"])
 

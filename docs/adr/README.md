@@ -14,3 +14,4 @@ should add a superseding ADR rather than rewriting history.
 - [0009: Bounded parallelism for dlt extraction and load](0009-bounded-ingestion-parallelism.md)
 - [0010: Use PostgreSQL as the authoritative DuckLake catalog](0010-postgresql-authoritative-ducklake-catalog.md)
 - [0011: Fix dlt extract-stage parallelism and expose ingestion tuning knobs](0011-fix-dlt-extract-parallelism.md)
+- [0012: Restore isolated build staging for the PostgreSQL-backed catalog](0012-restore-build-staging-for-postgresql-catalog.md)

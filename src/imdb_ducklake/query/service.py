@@ -54,10 +54,10 @@ def attach_sql(
 def configured_attach_sql(settings: Settings) -> str:
     """Resolve the configured shared catalog or the local promoted build."""
     if settings.catalog_url is not None:
-        target = CatalogTarget(settings.catalog_url, settings.lakehouse_dir / "storage")
+        target = CatalogTarget(settings.catalog_url, settings.current_dir / "storage")
         if not target.storage_dir.is_dir():
             raise NoPromotedBuildError(
-                f"Shared DuckLake storage does not exist: {target.storage_dir} "
+                f"No promoted build found in the shared DuckLake catalog: {target.storage_dir} "
                 f"({target.safe_identity})"
             )
         return attach_sql(
@@ -86,7 +86,7 @@ def connect_readonly(settings: Settings) -> duckdb.DuckDBPyConnection:
         identity = (
             CatalogTarget(
                 settings.catalog_url,
-                settings.lakehouse_dir / "storage",
+                settings.current_dir / "storage",
             ).safe_identity
             if settings.catalog_url is not None
             else str(settings.current_dir / "catalog.duckdb")
