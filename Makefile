@@ -25,23 +25,23 @@ endif
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
 	shell-ui clean-dlt-pipelines upload-bucket docker-image docker-up docker-build docker-down \
 	docker-status docker-download docker-ingest docker-transform docker-validate docker-checkpoint \
-	docker-app docker-app-logs
+	docker-app docker-app-logs docker-image-ready
 
 help:
 	@echo "Setup"
 	@echo "  make sync            uv sync --locked"
-	@echo "  make docker-image    build the Linux pipeline image"
-	@echo "  make docker-up       start PostgreSQL and build the Linux pipeline image"
-	@echo "  make docker-build    docker-up + run the full pipeline once (add ARGS=... as needed)"
+	@echo "  make docker-image    explicitly rebuild the Linux pipeline/app image"
+	@echo "  make docker-up       ensure PostgreSQL is running; never runs the pipeline"
+	@echo "  make docker-build    ensure prerequisites + run the full pipeline once"
 	@echo "  make docker-download download archives through the Linux container"
 	@echo "  make docker-ingest   ingest raw data into the PostgreSQL-backed DuckLake catalog"
 	@echo "  make docker-transform run dbt against the PostgreSQL-backed DuckLake catalog"
 	@echo "  make docker-validate validate the PostgreSQL-backed DuckLake catalog"
 	@echo "  make docker-checkpoint checkpoint the PostgreSQL-backed DuckLake catalog"
-	@echo "  make docker-app      start the Shiny app at http://localhost:8000"
+	@echo "  make docker-app      ensure PostgreSQL + Shiny are running; no pipeline run"
 	@echo "  make docker-app-logs follow Shiny app logs"
 	@echo "  make docker-status   show PostgreSQL and one-shot pipeline containers"
-	@echo "  make docker-down     stop services without deleting PostgreSQL data"
+	@echo "  make docker-down     stop services without deleting containers or data"
 	@echo ""
 	@echo "Quality gates (matches .github/workflows/ci.yml)"
 	@echo "  make format-check    ruff format --check ."
@@ -84,28 +84,30 @@ docker-image:
 
 docker-up:
 	docker compose up -d --wait postgres
-	docker compose build lakehouse
 
-docker-build: docker-up
+docker-image-ready: docker-up
+	@docker image inspect imdb-ducklake:latest >/dev/null 2>&1 || docker compose build lakehouse
+
+docker-build: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse build $(ARGS)
 
-docker-download: docker-up
+docker-download: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse download $(ARGS)
 
-docker-ingest: docker-up
+docker-ingest: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse ingest $(ARGS)
 
-docker-transform: docker-up
+docker-transform: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse transform $(ARGS)
 
-docker-validate: docker-up
+docker-validate: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse validate $(ARGS)
 
-docker-checkpoint: docker-up
+docker-checkpoint: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse checkpoint $(ARGS)
 
-docker-app: docker-up
-	docker compose up -d app
+docker-app:
+	docker compose up -d --wait postgres app
 
 docker-app-logs:
 	docker compose logs --follow app
@@ -114,7 +116,7 @@ docker-status:
 	docker compose ps -a
 
 docker-down:
-	docker compose down
+	docker compose stop
 
 format:
 	uv run ruff format .

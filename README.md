@@ -103,17 +103,23 @@ make docker-checkpoint
 make docker-app
 ```
 
-Each operational Docker target starts PostgreSQL if necessary, refreshes the Linux image, and runs
-one disposable `lakehouse` container. The PostgreSQL service retains DuckLake metadata in its named
-volume; the `./data:/data` bind mount retains the raw archives and Parquet data under
-`data/ducklake/storage/` on the host. `docker-transform`, `docker-validate`, and
-`docker-checkpoint` reuse that existing catalog and storage without repeating ingestion. dlt and dbt
-concurrency remain internal settings; callers do not create or coordinate process workers.
+`make docker-up` is idempotent: it only ensures PostgreSQL is running and healthy. It never rebuilds
+the image or runs the pipeline. `make docker-app` similarly ensures PostgreSQL and Shiny are healthy;
+calling it again leaves the existing containers in place. Use `make docker-image` explicitly after
+changing application code. Pipeline targets check that an image exists, build it only when missing,
+and then run only their named one-shot operation.
+
+The PostgreSQL service retains DuckLake metadata in its named volume; the `./data:/data` bind mount
+retains the raw archives and Parquet data under `data/ducklake/storage/` on the host.
+`docker-transform`, `docker-validate`, and `docker-checkpoint` reuse that existing catalog and
+storage without repeating ingestion. dlt and dbt concurrency remain internal settings; callers do
+not create or coordinate process workers.
 
 `make docker-app` starts the Shiny application at <http://localhost:8000>. The app executes queries
 with an in-process DuckDB connection, reads DuckLake metadata from the same PostgreSQL service, and
 reads the existing Parquet files from the read-only `/data/ducklake/storage` mount. Stop the app and
-PostgreSQL with `make docker-down`; use `make docker-app-logs` to follow its logs.
+PostgreSQL with `make docker-down`; this preserves the stopped containers and all data so the next
+`make docker-app` starts the same containers. Use `make docker-app-logs` to follow its logs.
 
 The Docker defaults are sized for an 8 GB Docker Desktop VM: one concurrent dbt node, two DuckDB
 query threads, and a 6 GB DuckDB memory limit. Override `IMDB_DUCKLAKE_DBT_THREADS`,
