@@ -1,5 +1,3 @@
-{{ config(materialized='table') }}
-
 select
     tconst,
     list(genre order by genre) as genres

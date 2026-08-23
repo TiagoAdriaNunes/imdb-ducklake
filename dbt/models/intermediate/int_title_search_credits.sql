@@ -1,5 +1,3 @@
-{{ config(materialized='table') }}
-
 select
     titles.tconst,
     directors.directors,

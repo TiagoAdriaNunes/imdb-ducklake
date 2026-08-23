@@ -175,6 +175,8 @@ def build_lakehouse(
                     else None
                 ),
                 catalog_target=catalog_target,
+                workers=settings.ingest_workers,
+                chunk_size=settings.ingest_chunk_size,
             )
         except BaseException:
             # An incomplete or failed raw load cannot be safely resumed, so this is the one

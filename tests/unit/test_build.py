@@ -51,10 +51,14 @@ def _install_successful_stages(monkeypatch) -> None:
         build_paths,
         pipelines_dir,
         progress,
+        workers,
+        chunk_size,
         catalog_target=None,
     ):
         assert isinstance(progress, StructuredLogCollector)
         assert progress.log_period == 10.0
+        assert workers >= 1
+        assert chunk_size >= 1
         build_paths.catalog_path.write_text("catalog", encoding="utf-8")
         (build_paths.storage_dir / "rows.parquet").write_text("rows", encoding="utf-8")
         return IngestionResult(
@@ -146,7 +150,9 @@ def test_postgresql_build_bypasses_file_promotion_and_checkpoint(tmp_path, monke
     downloader = FakeDownloader()
     calls: dict[str, object] = {}
 
-    def ingest(artifacts, *, build_paths, pipelines_dir, progress, catalog_target):
+    def ingest(
+        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
+    ):
         catalog_target.storage_dir.mkdir(parents=True, exist_ok=True)
         calls["ingestion_target"] = catalog_target
         return IngestionResult(
