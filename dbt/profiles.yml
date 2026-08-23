@@ -7,7 +7,7 @@ imdb_ducklake:
       schema: main
       # dbt node concurrency. Keep the Docker-safe default at one because multiple analytical
       # tests can each build large hash tables at the same time. Larger servers can override it.
-      threads: "{{ env_var('IMDB_DUCKLAKE_DBT_THREADS', '1') | int }}"
+      threads: "{{ env_var('IMDB_DUCKLAKE_DBT_THREADS', '2') | int }}"
       # Deliberately no temp_directory setting: dbt-duckdb re-issues every configured `settings:`
       # key as SET on each new per-query cursor it opens against the same DuckDB instance, but
       # DuckDB rejects a repeated `SET temp_directory` (even to the same value) once any cursor
