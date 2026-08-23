@@ -26,6 +26,8 @@ class Settings:
     log_format: str = "console"
     progress_interval_seconds: float = 10.0
     catalog_url: str | None = None
+    ingest_workers: int = 2
+    ingest_chunk_size: int = 50_000
 
     @classmethod
     def load(
@@ -37,6 +39,8 @@ class Settings:
         log_format: str | None = None,
         progress_interval_seconds: float | None = None,
         catalog_url: str | None = None,
+        ingest_workers: int | None = None,
+        ingest_chunk_size: int | None = None,
     ) -> "Settings":
         root = find_repository_root(repository_root)
         configured_data = data_dir or Path(environ.get("IMDB_LAKEHOUSE_DATA_DIR", "data"))
@@ -60,6 +64,28 @@ class Settings:
                 ) from error
         if configured_interval <= 0:
             raise ConfigurationError("Progress interval must be greater than zero")
+        configured_workers = ingest_workers
+        if configured_workers is None:
+            raw_workers = environ.get("IMDB_DUCKLAKE_INGEST_WORKERS", "2")
+            try:
+                configured_workers = int(raw_workers)
+            except ValueError as error:
+                raise ConfigurationError(
+                    "IMDB_DUCKLAKE_INGEST_WORKERS must be an integer"
+                ) from error
+        if configured_workers <= 0:
+            raise ConfigurationError("Ingest workers must be greater than zero")
+        configured_chunk_size = ingest_chunk_size
+        if configured_chunk_size is None:
+            raw_chunk_size = environ.get("IMDB_DUCKLAKE_INGEST_CHUNK_SIZE", "50000")
+            try:
+                configured_chunk_size = int(raw_chunk_size)
+            except ValueError as error:
+                raise ConfigurationError(
+                    "IMDB_DUCKLAKE_INGEST_CHUNK_SIZE must be an integer"
+                ) from error
+        if configured_chunk_size <= 0:
+            raise ConfigurationError("Ingest chunk size must be greater than zero")
         return cls(
             repository_root=root,
             data_dir=resolved_data.resolve(),
@@ -67,6 +93,8 @@ class Settings:
             log_format=configured_format,
             progress_interval_seconds=configured_interval,
             catalog_url=catalog_url or environ.get("IMDB_DUCKLAKE_CATALOG_URL"),
+            ingest_workers=configured_workers,
+            ingest_chunk_size=configured_chunk_size,
         )
 
     @property

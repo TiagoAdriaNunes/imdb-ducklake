@@ -20,7 +20,7 @@ models:
       +materialized: view
     intermediate:
       +schema: intermediate
-      +materialized: view
+      +materialized: table
     marts:
       +schema: marts
       +materialized: table

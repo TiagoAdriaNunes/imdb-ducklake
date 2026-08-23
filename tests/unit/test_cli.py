@@ -142,11 +142,15 @@ def test_ingest_command_loads_isolated_build_and_reports_catalog(tmp_path, monke
         build_paths,
         pipelines_dir,
         progress,
+        workers,
+        chunk_size,
     ):
         assert received == artifacts
         assert build_paths.storage_dir.is_dir()
         assert pipelines_dir == settings.dlt_pipelines_dir
         assert progress is not None
+        assert workers == settings.ingest_workers
+        assert chunk_size == settings.ingest_chunk_size
         build_paths.catalog_path.write_text("fixture", encoding="utf-8")
         return SimpleNamespace(load_ids=("load-1",), catalog_path=build_paths.catalog_path)
 

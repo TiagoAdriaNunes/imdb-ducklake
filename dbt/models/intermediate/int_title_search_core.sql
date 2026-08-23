@@ -1,5 +1,3 @@
-{{ config(materialized='table') }}
-
 with episode_counts as (
     select
         parent_tconst as tconst,

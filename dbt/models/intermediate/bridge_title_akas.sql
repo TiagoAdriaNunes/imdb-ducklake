@@ -1,3 +1,5 @@
+{{ config(materialized='view') }}
+
 select
     title_id as tconst,
     ordering,

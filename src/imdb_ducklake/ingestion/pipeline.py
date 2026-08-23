@@ -40,9 +40,10 @@ def ingest_snapshot(
     *,
     build_paths: BuildPaths,
     pipelines_dir: Path,
-    chunk_size: int = 5_000,
+    chunk_size: int = 50_000,
     progress: Collector | None = None,
     catalog_target: CatalogTarget | None = None,
+    workers: int = 2,
 ) -> IngestionResult:
     """Replace the raw schema with one complete seven-file IMDb snapshot."""
     _validate_complete_snapshot(artifacts)
@@ -122,9 +123,9 @@ def ingest_snapshot(
         )
         with dlt.config.values(
             {
-                "extract.workers": 2,
-                "load.workers": 2,
-                "normalize.workers": 2,
+                "extract.workers": workers,
+                "load.workers": workers,
+                "normalize.workers": workers,
                 "normalize.parquet_normalizer.add_dlt_load_id": True,
             }
         ):

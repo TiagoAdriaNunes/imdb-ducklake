@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 import dlt
 from dlt.common.schema.typing import TColumnSchema
-from dlt.common.storages.fsspec_filesystem import FileItemDict
 from dlt.extract.resource import DltResource
-from dlt.sources.filesystem import filesystem
 
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
 from imdb_ducklake.datasets import DatasetSpec
@@ -20,42 +19,36 @@ _NO_NULL_SENTINEL = "__IMDB_DUCKLAKE_NO_NULL_VALUE__"
 
 
 def _read_csv_duckdb_arrow(
-    items: Iterable[FileItemDict],
-    /,
+    path: Path,
     *,
     chunk_size: int,
     **duckdb_options: Any,
 ) -> Iterator[Any]:
-    """Stream CSV files as Arrow batches through DuckDB's current reader API.
+    """Stream one CSV file as Arrow batches through DuckDB's current reader API.
 
     Reads the path with ``compression="gzip"`` instead of a file object: a
     file object routes through DuckDB's PythonFilesystem, which buffers the
     whole decompressed file in memory first and OOMs on multi-GB archives.
 
     Opens its own connection rather than using DuckDB's implicit shared default
-    connection: this transformer runs ``parallelized``, so concurrent extraction of two
-    archives on the shared default connection would corrupt or fail each other's queries.
+    connection: the caller runs this as a ``parallelized`` resource, so concurrent
+    extraction of two archives on the shared default connection would corrupt or
+    fail each other's queries.
     """
     import duckdb
 
     connection = duckdb.connect(":memory:")
     try:
-        for item in items:
-            relation = connection.read_csv(
-                item.local_file_path, compression="gzip", **duckdb_options
-            )
-            yield from relation.to_arrow_reader(batch_size=chunk_size)
+        relation = connection.read_csv(str(path), compression="gzip", **duckdb_options)
+        yield from relation.to_arrow_reader(batch_size=chunk_size)
     finally:
         connection.close()
-
-
-read_csv_duckdb_arrow = dlt.transformer(parallelized=True)(_read_csv_duckdb_arrow)
 
 
 def build_ingestion_resources(
     artifacts: Iterable[VerifiedArtifact],
     *,
-    chunk_size: int = 5_000,
+    chunk_size: int = 50_000,
 ) -> tuple[DltResource, ...]:
     """Build one lossless raw resource per archive plus load-level file metadata."""
     if chunk_size < 1:
@@ -72,31 +65,43 @@ def build_ingestion_resources(
 
 
 def _raw_resource(artifact: VerifiedArtifact, *, chunk_size: int) -> DltResource:
+    """Build one top-level parallelized resource that reads exactly one known file.
+
+    Deliberately not a `filesystem() | transformer(parallelized=True)` pipe (dlt's
+    documented pattern for reading local files): that fork/transformer shape only
+    discovers its wrapped, poolable generator *after* the parent's single item has
+    been forked into it mid-run, and empirically that delayed discovery starves
+    round-robin scheduling across resources - verified two archives extracted
+    through it never overlapped even with `extract.workers > 1`. A plain top-level
+    `@dlt.resource(parallelized=True)` generator is present in the pool from the
+    first iteration and genuinely overlaps with sibling resources.
+    """
     _validate_artifact(artifact)
     dataset = artifact.dataset
-    files = filesystem(
-        bucket_url=artifact.path.parent.resolve().as_uri(),
-        file_glob=artifact.path.name,
-        files_per_page=1,
-    ).with_name(f"files_{dataset.table_name}")
-    reader = files | read_csv_duckdb_arrow(
-        chunk_size=chunk_size,
-        delimiter="\t",
-        header=True,
-        all_varchar=True,
-        columns={header: "VARCHAR" for header in dataset.headers},
-        na_values=_NO_NULL_SENTINEL,
-        quotechar="",
-        escapechar="",
-    )
-    reader.with_name(f"read_{dataset.table_name}")
-    reader.apply_hints(
+    path = artifact.path
+
+    @dlt.resource(
+        name=f"read_{dataset.table_name}",
         table_name=dataset.table_name,
         write_disposition="replace",
         columns=_raw_columns(dataset),
         schema_contract={"columns": "freeze", "data_type": "freeze"},
+        parallelized=True,
     )
-    return reader
+    def read_csv() -> Iterator[Any]:
+        yield from _read_csv_duckdb_arrow(
+            path,
+            chunk_size=chunk_size,
+            delimiter="\t",
+            header=True,
+            all_varchar=True,
+            columns={header: "VARCHAR" for header in dataset.headers},
+            na_values=_NO_NULL_SENTINEL,
+            quotechar="",
+            escapechar="",
+        )
+
+    return read_csv()
 
 
 def _manifest_resource(artifacts: tuple[VerifiedArtifact, ...]) -> DltResource:

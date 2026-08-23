@@ -1,5 +1,3 @@
-{{ config(materialized='table') }}
-
 select
     crew.tconst,
     coalesce(
