@@ -36,7 +36,7 @@ endif
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
-	shell-ui clean-dlt-pipelines upload-bucket docker-image docker-up docker-build docker-down \
+	shell-ui clean-dlt-pipelines upload-dataset docker-image docker-up docker-build docker-down \
 	docker-status docker-download docker-ingest docker-transform docker-validate docker-checkpoint \
 	docker-app docker-app-logs docker-image-ready docker-docs docker-publish-docs
 
@@ -91,7 +91,7 @@ help:
 	@echo "  make docker-shell    same, attached to the PostgreSQL-backed catalog (needs docker-up)"
 	@echo "  make docker-shell-ui same, and opens DuckDB's local web UI in your browser"
 	@echo "  make clean-dlt-pipelines  delete old dlt working dirs, keep the newest KEEP=3"
-	@echo "  make upload-bucket   hf sync data/ducklake/current/storage, marts/ only, prefix kept (app-required data, correct DATA_PATH layout) to \$$HF_BUCKET (required, e.g. hf://buckets/<you>/<name>)"
+	@echo "  make upload-dataset  hf upload data/ducklake/current/storage/marts (app-required data) to the HF Dataset repo \$$HF_DATASET_REPO (required, e.g. <you>/<name> - see ADR 0013: Buckets aren't attachable by DuckDB)"
 
 sync:
 	uv sync --locked
@@ -229,6 +229,12 @@ clean-dlt-pipelines:
 	if [ "$(DRY)" = "1" ]; then echo "(dry run, nothing deleted; rerun without DRY=1)"; exit 0; fi; \
 	echo "$$victims" | xargs -r rm -rf --
 
-upload-bucket:
-	@test -n "$(HF_BUCKET)" || { echo "set HF_BUCKET, e.g. HF_BUCKET=hf://buckets/<you>/<name> make upload-bucket"; exit 1; }
-	hf sync ./data/ducklake/current/storage $(HF_BUCKET) --include 'marts/*' $(ARGS)
+# DuckDB's hf:// filesystem only attaches hf://datasets/... or hf://spaces/..., never
+# hf://buckets/... (see ADR 0013) - this must publish to a Dataset repo, not a Bucket, for the
+# result to be directly readable by a DuckLake ATTACH. `marts` is uploaded as a path prefix (not
+# flattened) so a later ATTACH's DATA_PATH can be the repo root, matching current/storage's own
+# layout (marts/ alongside raw/ and intermediate/).
+upload-dataset:
+	@test -n "$(HF_DATASET_REPO)" || { echo "set HF_DATASET_REPO, e.g. HF_DATASET_REPO=<you>/<name> make upload-dataset"; exit 1; }
+	hf upload $(HF_DATASET_REPO) ./data/ducklake/current/storage/marts marts --type dataset \
+		--commit-message "Upload marts data" $(ARGS)
