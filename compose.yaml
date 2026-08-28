@@ -29,6 +29,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      IMDB_DUCKLAKE_ENV: ${IMDB_DUCKLAKE_ENV:-docker}
       IMDB_DUCKLAKE_CATALOG_URL: ${IMDB_DUCKLAKE_CATALOG_URL:-postgresql://imdb:imdb-local-dev@postgres:5432/ducklake_catalog}
       IMDB_DUCKLAKE_DBT_THREADS: ${IMDB_DUCKLAKE_DBT_THREADS:-2}
       IMDB_DUCKLAKE_QUERY_THREADS: ${IMDB_DUCKLAKE_QUERY_THREADS:-2}
@@ -51,9 +52,17 @@ services:
         condition: service_healthy
     command: ["app"]
     environment:
+      # docker-cloud instead of docker in your .env additionally requires IMDB_DUCKLAKE_STORAGE_URL
+      # to be set (enforced by Settings.load) rather than silently falling back to local storage.
+      IMDB_DUCKLAKE_ENV: ${IMDB_DUCKLAKE_ENV:-docker}
       IMDB_DUCKLAKE_CATALOG_URL: ${IMDB_DUCKLAKE_CATALOG_URL:-postgresql://imdb:imdb-local-dev@postgres:5432/ducklake_catalog}
       IMDB_DUCKLAKE_QUERY_THREADS: ${IMDB_DUCKLAKE_QUERY_THREADS:-2}
       IMDB_DUCKLAKE_APP_PORT: 8000
+      # Reads marts from this Hugging Face Dataset repo (see ADR 0013) instead of local
+      # current/storage when set. HF_TOKEN authenticates DuckDB's credential_chain provider
+      # against the private repo - the container has no access to a host `hf auth login` cache.
+      IMDB_DUCKLAKE_STORAGE_URL: ${IMDB_DUCKLAKE_STORAGE_URL:-}
+      HF_TOKEN: ${HF_TOKEN:-}
     ports:
       - "${IMDB_DUCKLAKE_APP_PORT:-8000}:8000"
     volumes:

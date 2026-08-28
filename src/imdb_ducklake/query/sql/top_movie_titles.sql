@@ -9,9 +9,7 @@ select
     array_to_string(genres, ', ') as "Genres",
     array_to_string(directors, ', ') as "Directors",
     array_to_string(writers, ', ') as "Writers"
-from marts.mart_title_search
-where
-    title_type = 'movie'
-    and num_votes >= 50000
-order by average_rating desc nulls last, num_votes desc nulls last
+from marts.mart_top_titles
+where title_type = 'movie'
+order by title_rank
 limit {{ limit }}

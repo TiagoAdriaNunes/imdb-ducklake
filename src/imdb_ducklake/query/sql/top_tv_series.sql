@@ -11,9 +11,7 @@ select
     array_to_string(titles.genres, ', ') as "Genres",
     array_to_string(titles.directors, ', ') as "Directors",
     array_to_string(titles.writers, ', ') as "Writers"
-from marts.mart_title_search as titles
-where
-    titles.title_type = 'tvSeries'
-    and titles.num_votes >= 50000
-order by titles.average_rating desc nulls last, titles.num_votes desc nulls last
+from marts.mart_top_titles as titles
+where titles.title_type = 'tvSeries'
+order by titles.title_rank
 limit {{ limit }}
