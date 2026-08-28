@@ -21,6 +21,29 @@ models:
       - {name: directors, data_type: "varchar[]", description: Director name array.}
       - {name: writers, data_type: "varchar[]", description: Writer name array.}
       - {name: dlt_load_id, data_type: varchar, description: Raw title lineage., data_tests: [not_null]}
+  - name: mart_top_titles
+    description: >
+      Precomputed top-500-per-type ranking (average_rating desc, num_votes desc, num_votes >=
+      50000) for movie and tvSeries, grain tconst. Exists so the app's default listing is a small
+      LIMIT scan instead of a full sort over mart_title_search - the latter takes minutes to
+      evaluate against remote Parquet storage (see ADR 0013), even though it's fast locally.
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: tconst, data_type: varchar, description: Title key., data_tests: [not_null, unique]}
+      - {name: title_type, data_type: varchar, description: "movie or tvSeries only.", data_tests: [not_null]}
+      - {name: primary_title, data_type: varchar, description: Searchable title text.}
+      - {name: original_title, data_type: varchar, description: Original title text.}
+      - {name: start_year, data_type: smallint, description: Release start year; TV series start year for series.}
+      - {name: end_year, data_type: smallint, description: TV series end year; null for movies.}
+      - {name: runtime_minutes, data_type: integer, description: "Primary runtime, in minutes."}
+      - {name: episode_count, data_type: bigint, description: Number of episodes linked to a TV series; null for movies.}
+      - {name: average_rating, data_type: double, description: Average rating measure.}
+      - {name: num_votes, data_type: bigint, description: Vote-count measure.}
+      - {name: genres, data_type: "varchar[]", description: Genre array.}
+      - {name: directors, data_type: "varchar[]", description: Director name array.}
+      - {name: writers, data_type: "varchar[]", description: Writer name array.}
+      - {name: title_rank, data_type: bigint, description: Rank within title_type, 1 is best., data_tests: [not_null]}
   - name: mart_genre_year_summary
     description: Title, rating, and vote summaries by year, title type, and genre, grain (start_year, title_type, genre).
     config:

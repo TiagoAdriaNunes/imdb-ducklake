@@ -50,6 +50,26 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
     connection.execute("create table marts.mart_series_episodes (series_tconst varchar)")
     connection.execute(
         """
+        create table marts.mart_top_titles (
+            tconst varchar,
+            title_type varchar,
+            primary_title varchar,
+            original_title varchar,
+            start_year integer,
+            end_year integer,
+            runtime_minutes integer,
+            episode_count bigint,
+            average_rating double,
+            num_votes bigint,
+            genres varchar[],
+            directors varchar[],
+            writers varchar[],
+            title_rank bigint
+        )
+        """
+    )
+    connection.execute(
+        """
         insert into marts.mart_title_search values
             ('tt0000001', 'movie', 'The Matrix', 'The Matrix', false, 1999, NULL,
              136, NULL, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
@@ -66,6 +86,23 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
             ('tt0000005', 'short', 'Bao', 'Bao', false, 2018, NULL,
              8, NULL, 8.1, 90000, ['Animation', 'Comedy', 'Drama'], ['Domee Shi'],
              ['Domee Shi'], 'load1')
+        """
+    )
+    connection.execute(
+        """
+        insert into marts.mart_top_titles values
+            ('tt0000003', 'movie', 'Inception', 'Inception', 2010, NULL,
+             148, NULL, 8.8, 2300000, ['Action', 'Sci-Fi'], ['Christopher Nolan'],
+             ['Christopher Nolan'], 1),
+            ('tt0000001', 'movie', 'The Matrix', 'The Matrix', 1999, NULL,
+             136, NULL, 8.7, 2000000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
+             ['Lana Wachowski', 'Lilly Wachowski'], 2),
+            ('tt0000002', 'movie', 'The Matrix Reloaded', 'The Matrix Reloaded',
+             2003, NULL, 138, NULL, 7.2, 700000, ['Action', 'Sci-Fi'], ['Lana Wachowski'],
+             ['Lana Wachowski', 'Lilly Wachowski'], 3),
+            ('tt0000004', 'tvSeries', 'Breaking Bad', 'Breaking Bad', 2008, 2013,
+             47, 62, 9.5, 2100000, ['Crime', 'Drama'], ['Vince Gilligan'],
+             ['Vince Gilligan'], 1)
         """
     )
     connection.execute(

@@ -32,18 +32,30 @@ _TITLE_CAST_SQL = (_SQL_DIR / "title_cast.sql").read_text(encoding="utf-8")
 
 def attach_sql(
     metadata_path: Path | str,
-    storage_dir: Path,
+    storage_location: Path | str,
     *,
     metadata_schema: str = "main",
 ) -> str:
-    """Build the read-only ATTACH statements for a DuckLake catalog/storage pair."""
+    """Build the read-only ATTACH statements for a DuckLake catalog/storage pair.
+
+    ``storage_location`` is a local directory for on-disk storage, or a string DATA_PATH (e.g.
+    ``hf://datasets/<repo>``) for remote storage - never ``hf://buckets/...``, which DuckDB
+    cannot attach (ADR 0013). A remote location also emits a Hugging Face credential secret so
+    DuckDB can read a private repo using the caller's cached `hf auth login` token.
+    """
     metadata = metadata_path.as_posix() if isinstance(metadata_path, Path) else metadata_path
     catalog = _sql_string(f"ducklake:{metadata}")
-    storage = _sql_string(storage_dir.resolve().as_posix())
+    if isinstance(storage_location, Path):
+        storage = _sql_string(storage_location.resolve().as_posix())
+        secret_sql = ""
+    else:
+        storage = _sql_string(storage_location)
+        secret_sql = "CREATE SECRET hf_token (TYPE huggingface, PROVIDER credential_chain);\n"
     schema = _sql_string(metadata_schema)
     return (
         "INSTALL ducklake;\n"
         "LOAD ducklake;\n"
+        f"{secret_sql}"
         f"ATTACH {catalog} AS {ATTACH_ALIAS} "
         f"(DATA_PATH {storage}, METADATA_SCHEMA {schema}, "
         "OVERRIDE_DATA_PATH true, READ_ONLY);\n"
@@ -55,14 +67,15 @@ def configured_attach_sql(settings: Settings) -> str:
     """Resolve the configured shared catalog or the local promoted build."""
     if settings.catalog_url is not None:
         target = CatalogTarget(settings.catalog_url, settings.current_dir / "storage")
-        if not target.storage_dir.is_dir():
+        storage_location: Path | str = settings.storage_url or target.storage_dir
+        if isinstance(storage_location, Path) and not storage_location.is_dir():
             raise NoPromotedBuildError(
-                f"No promoted build found in the shared DuckLake catalog: {target.storage_dir} "
+                f"No promoted build found in the shared DuckLake catalog: {storage_location} "
                 f"({target.safe_identity})"
             )
         return attach_sql(
             target.duckdb_metadata_path,
-            target.storage_dir,
+            storage_location,
             metadata_schema=target.metadata_schema,
         )
 

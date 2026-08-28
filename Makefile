@@ -12,9 +12,6 @@ DBT_ENV := \
 	IMDB_DUCKLAKE_DBT_CONTROLLER="$(REPO_ROOT)/data/.dbt/controller.duckdb" \
 	IMDB_DUCKLAKE_CATALOG="$(REPO_ROOT)/data/ducklake/current/catalog.duckdb" \
 	IMDB_DUCKLAKE_STORAGE="$(REPO_ROOT)/data/ducklake/current/storage"
-# Same defaults as compose.yaml/.env.example, so this points at the PostgreSQL-backed catalog
-# the docker-* pipeline targets promote into (published to localhost by `docker compose up postgres`).
-DOCKER_CATALOG_ENV := IMDB_DUCKLAKE_CATALOG_URL="postgresql://$${POSTGRES_USER:-imdb}:$${POSTGRES_PASSWORD:-imdb-local-dev}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-ducklake_catalog}"
 # dbt-duckdb's `attach.path` (dbt/profiles.yml) needs the raw duckdb postgres DSN, not a
 # postgresql:// URL, and the docker-* pipeline targets write to a flat data/ducklake/storage (no
 # "current" promotion dir) under the imdb_lake metadata schema - see CatalogTarget in
@@ -194,10 +191,10 @@ package:
 ci: format-check lint sql-lint typecheck dbt-parse coverage package
 
 shell:
-	$(DOCKER_CATALOG_ENV) uv run python scripts/duckdb_shell.py
+	IMDB_DUCKLAKE_ENV=docker uv run python scripts/duckdb_shell.py
 
 shell-ui:
-	$(DOCKER_CATALOG_ENV) uv run python scripts/duckdb_shell.py --ui
+	IMDB_DUCKLAKE_ENV=docker uv run python scripts/duckdb_shell.py --ui
 
 download:
 	$(PIPELINE_ENV) uv run imdb-lakehouse download $(ARGS)
