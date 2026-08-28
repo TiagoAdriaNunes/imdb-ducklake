@@ -123,6 +123,28 @@ def test_docker_environment_computes_default_catalog_url(tmp_path, monkeypatch) 
     assert settings.storage_url is None
 
 
+def test_docker_environment_rejects_stray_storage_url(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.setenv("IMDB_DUCKLAKE_STORAGE_URL", "hf://datasets/you/name")
+
+    with pytest.raises(ConfigurationError, match="IMDB_DUCKLAKE_ENV is 'docker'"):
+        Settings.load(repository_root=root, environment="docker")
+
+
+def test_docker_environment_ignores_empty_string_storage_url(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    # Mirrors compose.yaml's `${IMDB_DUCKLAKE_STORAGE_URL:-}` - present but empty, not absent.
+    monkeypatch.setenv("IMDB_DUCKLAKE_STORAGE_URL", "")
+
+    settings = Settings.load(repository_root=root, environment="docker")
+
+    assert settings.storage_url is None
+
+
 def test_docker_cloud_requires_storage_url(tmp_path) -> None:
     root = tmp_path / "project"
     root.mkdir()

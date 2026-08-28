@@ -138,12 +138,20 @@ class Settings:
                 or _env_or_none("IMDB_DUCKLAKE_CATALOG_URL")
                 or _default_docker_catalog_url()
             )
-            resolved_storage_url = storage_url or _env_or_none("IMDB_DUCKLAKE_STORAGE_URL")
-            if configured_environment == "docker-cloud" and resolved_storage_url is None:
-                raise ConfigurationError(
-                    "IMDB_DUCKLAKE_ENV=docker-cloud requires IMDB_DUCKLAKE_STORAGE_URL "
-                    "(e.g. hf://datasets/<you>/<name>)"
-                )
+            if configured_environment == "docker":
+                if storage_url is None and _env_or_none("IMDB_DUCKLAKE_STORAGE_URL") is not None:
+                    raise ConfigurationError(
+                        "IMDB_DUCKLAKE_STORAGE_URL is set but IMDB_DUCKLAKE_ENV is 'docker' - "
+                        "set IMDB_DUCKLAKE_ENV=docker-cloud to read from remote storage"
+                    )
+                resolved_storage_url = storage_url
+            else:
+                resolved_storage_url = storage_url or _env_or_none("IMDB_DUCKLAKE_STORAGE_URL")
+                if resolved_storage_url is None:
+                    raise ConfigurationError(
+                        "IMDB_DUCKLAKE_ENV=docker-cloud requires IMDB_DUCKLAKE_STORAGE_URL "
+                        "(e.g. hf://datasets/<you>/<name>)"
+                    )
 
         return cls(
             repository_root=root,
