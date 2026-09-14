@@ -245,7 +245,7 @@ def test_one_command_builds_validates_and_promotes_fixture_snapshot(tmp_path) ->
     )
 
     assert result.promoted.current_dir == settings.current_dir
-    assert result.validation.relation_count == 30
+    assert result.validation.relation_count == 33
     assert result.validation.mart_row_counts["mart_title_search"] == 2
     assert result.promoted.previous_dir is not None
     assert (result.promoted.previous_dir / "previous.txt").read_text(encoding="utf-8") == (
