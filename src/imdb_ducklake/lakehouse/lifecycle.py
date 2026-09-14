@@ -389,8 +389,17 @@ def prune_obsolete_builds(
     return tuple(removed)
 
 
-def select_staged_build(lakehouse_dir: Path, *, build_id: str | None = None) -> BuildPaths:
-    """Select one complete unpromoted build, requiring an ID when selection is ambiguous."""
+def select_staged_build(
+    lakehouse_dir: Path,
+    *,
+    build_id: str | None = None,
+    require_catalog_file: bool = True,
+) -> BuildPaths:
+    """Select one complete unpromoted build, requiring an ID when selection is ambiguous.
+
+    ``require_catalog_file=False`` selects a PostgreSQL-backed staged build, which has no local
+    ``catalog.duckdb`` (metadata lives in PostgreSQL) - matches ``promote_build``'s own flag.
+    """
     root = lakehouse_dir.resolve()
     if build_id is not None:
         candidates = (BuildPaths.create(root, build_id=build_id),)
@@ -408,7 +417,7 @@ def select_staged_build(lakehouse_dir: Path, *, build_id: str | None = None) -> 
         candidates = (BuildPaths.create(root, build_id=directories[0].name),)
     selected = candidates[0]
     try:
-        _validate_promotable_layout(selected)
+        _validate_promotable_layout(selected, require_catalog_file=require_catalog_file)
     except PromotionError as error:
         raise LifecycleError(f"Staged build is incomplete: {selected.temporary_dir}") from error
     return selected
