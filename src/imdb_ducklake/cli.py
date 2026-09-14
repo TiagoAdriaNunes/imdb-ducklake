@@ -284,7 +284,11 @@ def transform_command(
         settings = _settings_for_command(ctx, data_dir=data_dir)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
             recover_interrupted_promotion(settings.lakehouse_dir)
-            paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+            paths = select_staged_build(
+                settings.lakehouse_dir,
+                build_id=build_id,
+                require_catalog_file=settings.catalog_url is None,
+            )
             catalog_target = (
                 CatalogTarget(settings.catalog_url, paths.storage_dir)
                 if settings.catalog_url is not None
@@ -338,28 +342,53 @@ def promote_command(
         ),
     ] = None,
 ) -> None:
-    """Validate and atomically promote one staged DuckLake build."""
+    """Validate and atomically promote one staged DuckLake build, PostgreSQL-backed or not."""
     try:
         settings = _settings_for_command(ctx, data_dir=data_dir)
         with BuildLock(settings.lakehouse_dir / ".build.lock"):
             recover_interrupted_promotion(settings.lakehouse_dir)
-            paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+            paths = select_staged_build(
+                settings.lakehouse_dir,
+                build_id=build_id,
+                require_catalog_file=settings.catalog_url is None,
+            )
+            staged_catalog_target = (
+                CatalogTarget(settings.catalog_url, paths.storage_dir)
+                if settings.catalog_url is not None
+                else None
+            )
             staged_validation = validate_build(
                 paths,
                 executable=python_executable,
                 environment=environ,
                 working_directory=settings.repository_root,
+                catalog_target=staged_catalog_target,
             )
-            promoted = promote_build(paths)
-            checkpoint_lakehouse(promoted.catalog_path, promoted.storage_dir)
-            current_validation = validate_catalog(
-                catalog_path=promoted.catalog_path,
-                storage_dir=promoted.storage_dir,
-                build_id=promoted.build_id,
-                executable=python_executable,
-                environment=environ,
-                working_directory=settings.repository_root,
-            )
+            promoted = promote_build(paths, require_catalog_file=staged_catalog_target is None)
+            if staged_catalog_target is None:
+                checkpoint_lakehouse(promoted.catalog_path, promoted.storage_dir)
+                current_validation = validate_catalog(
+                    catalog_path=promoted.catalog_path,
+                    storage_dir=promoted.storage_dir,
+                    build_id=promoted.build_id,
+                    executable=python_executable,
+                    environment=environ,
+                    working_directory=settings.repository_root,
+                )
+            else:
+                promoted_catalog_target = CatalogTarget(
+                    staged_catalog_target.url,
+                    promoted.storage_dir,
+                    staged_catalog_target.metadata_schema,
+                )
+                checkpoint_catalog_target(promoted_catalog_target)
+                current_validation = validate_build(
+                    BuildPaths.create(settings.lakehouse_dir, build_id=promoted.build_id),
+                    executable=python_executable,
+                    environment=environ,
+                    working_directory=settings.repository_root,
+                    catalog_target=promoted_catalog_target,
+                )
             removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1) if prune else ()
         typer.echo(
             f"Promoted build {promoted.build_id} to {promoted.current_dir} after validating "
