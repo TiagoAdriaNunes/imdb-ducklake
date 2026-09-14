@@ -34,6 +34,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
+    seed_raw_storage,
 )
 from imdb_ducklake.lakehouse.validation import ValidationResult, validate_build
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult, run_dbt
@@ -149,6 +150,14 @@ def build_lakehouse(
             )
 
         initialize_build(paths)
+        if catalog_target is not None:
+            seed_raw_storage(paths, settings.current_dir / "storage")
+            build_logger.info(
+                "Raw storage seeded from promoted build",
+                event_code="raw_storage_seeded",
+                stage="ingestion",
+                status="completed",
+            )
         build_logger.info(
             "Ingestion started",
             event_code="ingestion_started",

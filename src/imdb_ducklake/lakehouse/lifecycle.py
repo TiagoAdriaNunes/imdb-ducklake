@@ -138,6 +138,30 @@ def initialize_build(paths: BuildPaths) -> None:
         raise LifecycleError(f"Could not initialize build storage {paths.storage_dir}") from error
 
 
+def seed_raw_storage(build_paths: BuildPaths, current_storage_dir: Path) -> None:
+    """Copy a promoted build's ``raw/`` Parquet forward into a fresh isolated build.
+
+    PostgreSQL-backed builds share one persistent metadata catalog across every build (ADR 0012);
+    only the storage directory is isolated per build. dlt's own bookkeeping tables (``_dlt_loads``,
+    ``_dlt_version``, ``_dlt_pipeline_state``) are never dropped between runs - the catalog already
+    has committed history for them once any build has been promoted - so a fresh, empty isolated
+    storage directory leaves their physical Parquet files unreachable and dlt's sync step fails.
+    Copying ``raw/`` forward keeps those files reachable; ingestion's ``refresh="drop_data"``
+    immediately orphans the copies once it replaces each table's data, and the existing
+    ``ducklake_delete_orphaned_files`` checkpoint step reclaims that space after promotion.
+    No-op when there is no promoted build yet (the first-ever build).
+    """
+    source = current_storage_dir / "raw"
+    if not source.is_dir():
+        return
+    try:
+        shutil.copytree(source, build_paths.storage_dir / "raw", dirs_exist_ok=True)
+    except OSError as error:
+        raise LifecycleError(
+            f"Could not seed raw storage for {build_paths.temporary_dir}"
+        ) from error
+
+
 def cleanup_build(paths: BuildPaths) -> None:
     """Remove only the validated temporary directory owned by ``paths``."""
     _validate_owned_build_path(paths)
