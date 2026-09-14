@@ -212,6 +212,98 @@ def test_postgresql_build_stages_writes_and_promotes_to_current(tmp_path, monkey
     assert checkpoint_calls[0].storage_dir == result.promoted.storage_dir
 
 
+def test_postgresql_build_seeds_raw_storage_from_current(tmp_path, monkeypatch) -> None:
+    """dlt's own bookkeeping tables (_dlt_loads, etc.) are never dropped between runs and the
+    Postgres catalog already has committed history for them once any build has been promoted, so
+    a fresh isolated builds/<id>/storage must be seeded with the promoted build's raw/ Parquet
+    first - otherwise dlt's sync step fails trying to open a file that only exists under
+    current/storage (see the ADR 0012 gap this seeding fixes)."""
+    base = _settings(tmp_path)
+    settings = Settings(
+        repository_root=base.repository_root,
+        data_dir=base.data_dir,
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    promoted_raw = settings.current_dir / "storage" / "raw"
+    promoted_raw.mkdir(parents=True)
+    (promoted_raw / "_dlt_loads.parquet").write_text("history", encoding="utf-8")
+    downloader = FakeDownloader()
+    seeded_before_ingest: dict[str, str] = {}
+
+    def ingest(
+        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
+    ):
+        seeded_before_ingest["content"] = (
+            build_paths.storage_dir / "raw" / "_dlt_loads.parquet"
+        ).read_text(encoding="utf-8")
+        return IngestionResult(
+            "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir
+        )
+
+    monkeypatch.setattr(build_module, "ingest_snapshot", ingest)
+    monkeypatch.setattr(
+        build_module, "run_dbt", lambda *_a, **_kw: DbtRunResult(("dbt", "build"), "passed", "")
+    )
+    monkeypatch.setattr(
+        build_module,
+        "validate_build",
+        lambda paths, **_kwargs: ValidationResult(paths.build_id, 31, {"mart": 1}),
+    )
+    monkeypatch.setattr(build_module, "checkpoint_catalog_target", lambda *_a, **_kw: ())
+
+    build_lakehouse(
+        settings=settings,
+        downloader=downloader,
+        dbt_executable="dbt",
+        python_executable="python",
+        environment={},
+        reserve_bytes=0,
+    )
+
+    assert seeded_before_ingest["content"] == "history"
+
+
+def test_postgresql_first_build_has_no_raw_storage_to_seed(tmp_path, monkeypatch) -> None:
+    """The very first Postgres-backed build has no promoted current/storage yet - seeding must be
+    a no-op, not an error."""
+    base = _settings(tmp_path)
+    settings = Settings(
+        repository_root=base.repository_root,
+        data_dir=base.data_dir,
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    assert not settings.current_dir.exists()
+    downloader = FakeDownloader()
+
+    def ingest(
+        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
+    ):
+        assert not (build_paths.storage_dir / "raw").exists()
+        return IngestionResult(
+            "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir
+        )
+
+    monkeypatch.setattr(build_module, "ingest_snapshot", ingest)
+    monkeypatch.setattr(
+        build_module, "run_dbt", lambda *_a, **_kw: DbtRunResult(("dbt", "build"), "passed", "")
+    )
+    monkeypatch.setattr(
+        build_module,
+        "validate_build",
+        lambda paths, **_kwargs: ValidationResult(paths.build_id, 31, {"mart": 1}),
+    )
+    monkeypatch.setattr(build_module, "checkpoint_catalog_target", lambda *_a, **_kw: ())
+
+    build_lakehouse(
+        settings=settings,
+        downloader=downloader,
+        dbt_executable="dbt",
+        python_executable="python",
+        environment={},
+        reserve_bytes=0,
+    )
+
+
 def test_postgresql_build_failure_leaves_staged_build_for_retry(tmp_path, monkeypatch) -> None:
     """Unlike the old shared-storage design, a PostgreSQL-mode build now stages into its own
     builds/<id>/, untouched by anything else - so a post-ingestion failure can leave it in place

@@ -6,10 +6,7 @@ select
     runtime_minutes as "Runtime (min)",
     average_rating as "Rating",
     num_votes as "Votes",
-    array_to_string(genres, ', ') as "Genres",
-    array_to_string(directors, ', ') as "Directors",
-    array_to_string(writers, ', ') as "Writers"
-from marts.mart_top_titles
-where title_type = 'movie'
-order by title_rank
-limit {{ limit }}
+    genres_text as "Genres",
+    directors_text as "Directors",
+    writers_text as "Writers"
+from marts.mart_top_movies
