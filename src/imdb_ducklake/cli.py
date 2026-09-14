@@ -227,7 +227,9 @@ def ingest_command(
                     "A staged build already exists. Run transform first or pass "
                     f"--replace-staged to discard it: {staged_ids}"
                 )
-            if replace_staged:
+            # PostgreSQL mode only: skip pruning here too - see build_lakehouse's identical
+            # guard for why blind builds/<id> deletion is unsafe once the catalog is shared.
+            if replace_staged and catalog_target is None:
                 prune_obsolete_builds(settings.lakehouse_dir)
             with temporary_build(paths):
                 if catalog_target is None:
@@ -389,7 +391,13 @@ def promote_command(
                     working_directory=settings.repository_root,
                     catalog_target=promoted_catalog_target,
                 )
-            removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1) if prune else ()
+            # PostgreSQL mode only: skip pruning here too - see build_lakehouse's identical
+            # guard for why blind builds/<id> deletion is unsafe once the catalog is shared.
+            removed = (
+                prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
+                if prune and staged_catalog_target is None
+                else ()
+            )
         typer.echo(
             f"Promoted build {promoted.build_id} to {promoted.current_dir} after validating "
             f"{staged_validation.relation_count} staged relations and reattaching "
