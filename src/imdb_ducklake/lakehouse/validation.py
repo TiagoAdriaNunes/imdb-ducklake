@@ -65,6 +65,9 @@ REQUIRED_RELATIONS: dict[str, frozenset[str]] = {
             "mart_person_filmography",
             "mart_series_episodes",
             "mart_title_search",
+            "mart_top_titles",
+            "mart_top_movies",
+            "mart_top_tv_series",
         }
     ),
 }
@@ -260,6 +263,18 @@ def _validate_read_only(
                 """
                 select series_tconst, episode_tconst, season_number, episode_number
                 from imdb_lake.marts.mart_series_episodes limit 1
+                """,
+                """
+                select tconst, title_type, title_rank, average_rating, num_votes
+                from imdb_lake.marts.mart_top_titles limit 1
+                """,
+                """
+                select tconst, primary_title, average_rating, num_votes, title_rank
+                from imdb_lake.marts.mart_top_movies limit 1
+                """,
+                """
+                select tconst, primary_title, average_rating, num_votes, title_rank
+                from imdb_lake.marts.mart_top_tv_series limit 1
                 """,
             )
             for query in representative_queries:

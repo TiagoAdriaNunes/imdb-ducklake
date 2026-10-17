@@ -107,6 +107,60 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
     )
     connection.execute(
         """
+        create table marts.mart_top_movies (
+            tconst varchar,
+            primary_title varchar,
+            original_title varchar,
+            start_year integer,
+            runtime_minutes integer,
+            average_rating double,
+            num_votes bigint,
+            title_rank bigint,
+            genres_text varchar,
+            directors_text varchar,
+            writers_text varchar
+        )
+        """
+    )
+    connection.execute(
+        """
+        create table marts.mart_top_tv_series (
+            tconst varchar,
+            primary_title varchar,
+            original_title varchar,
+            start_year integer,
+            end_year integer,
+            runtime_minutes integer,
+            episode_count bigint,
+            average_rating double,
+            num_votes bigint,
+            title_rank bigint,
+            genres_text varchar,
+            directors_text varchar,
+            writers_text varchar
+        )
+        """
+    )
+    connection.execute(
+        """
+        insert into marts.mart_top_movies values
+            ('tt0000003', 'Inception', 'Inception', 2010, 148, 8.8, 2300000, 1,
+             'Action, Sci-Fi', 'Christopher Nolan', 'Christopher Nolan'),
+            ('tt0000001', 'The Matrix', 'The Matrix', 1999, 136, 8.7, 2000000, 2,
+             'Action, Sci-Fi', 'Lana Wachowski', 'Lana Wachowski, Lilly Wachowski'),
+            ('tt0000002', 'The Matrix Reloaded', 'The Matrix Reloaded', 2003, 138, 7.2, 700000, 3,
+             'Action, Sci-Fi', 'Lana Wachowski', 'Lana Wachowski, Lilly Wachowski')
+        """
+    )
+    connection.execute(
+        """
+        insert into marts.mart_top_tv_series values
+            ('tt0000004', 'Breaking Bad', 'Breaking Bad', 2008, 2013, 47, 62, 9.5, 2100000, 1,
+             'Crime, Drama', 'Vince Gilligan', 'Vince Gilligan')
+        """
+    )
+    connection.execute(
+        """
         create table marts.mart_person_filmography (
             nconst varchar,
             primary_name varchar,
@@ -256,12 +310,23 @@ def test_search_titles_empty_query_returns_top_by_votes(
     assert tconsts == ["tt0000003", "tt0000001", "tt0000002"]
 
 
-def test_search_titles_respects_limit(settings_with_fixture_build: Settings) -> None:
+def test_search_titles_top_query_ignores_limit(settings_with_fixture_build: Settings) -> None:
+    """The empty-query path now reads the pre-shaped mart_top_movies/mart_top_tv_series marts
+    directly (select * ... order by title_rank), which are already bounded to 500 rows per
+    title_type by dbt - the app-level limit only matters for the search path."""
     connection = connect_readonly(settings_with_fixture_build)
 
     tconsts = _tconsts(search_titles(connection, "", title_type="movie", limit=1))
 
-    assert tconsts == ["tt0000003"]
+    assert tconsts == ["tt0000003", "tt0000001", "tt0000002"]
+
+
+def test_search_titles_search_query_respects_limit(settings_with_fixture_build: Settings) -> None:
+    connection = connect_readonly(settings_with_fixture_build)
+
+    tconsts = _tconsts(search_titles(connection, "matrix", title_type="movie", limit=1))
+
+    assert tconsts == ["tt0000001"]
 
 
 def test_search_titles_returns_tv_series(settings_with_fixture_build: Settings) -> None:

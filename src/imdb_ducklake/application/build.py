@@ -34,6 +34,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
+    seed_raw_storage,
 )
 from imdb_ducklake.lakehouse.validation import ValidationResult, validate_build
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult, run_dbt
@@ -138,17 +139,36 @@ def build_lakehouse(
             temporary_size_factor=temporary_size_factor,
             log=build_logger,
         )
-        removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
-        if removed:
-            build_logger.info(
-                "Obsolete builds pruned",
-                event_code="obsolete_builds_pruned",
-                stage="lifecycle",
-                status="completed",
-                count=len(removed),
-            )
+        # PostgreSQL mode only: the shared catalog is cumulative across every build attempt (ADR
+        # 0012), so an earlier attempt's ingestion or dbt run can commit table snapshots pointing
+        # at files under its own builds/<id>/storage even though that attempt never promoted (a
+        # failed dbt test, a crash, anything short of full success). Deleting that directory here
+        # - on the very next build attempt, before this one has even started - orphans the
+        # catalog's own live references to those files, breaking reads (including the live app)
+        # for every table the earlier attempt touched, not just its own. Only
+        # ducklake_delete_orphaned_files (wired into checkpoint, and genuinely catalog-aware) can
+        # safely tell which physical files nothing references any more; directory-level pruning
+        # cannot make that determination for a shared catalog and must not run in this mode.
+        if catalog_target is None:
+            removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
+            if removed:
+                build_logger.info(
+                    "Obsolete builds pruned",
+                    event_code="obsolete_builds_pruned",
+                    stage="lifecycle",
+                    status="completed",
+                    count=len(removed),
+                )
 
         initialize_build(paths)
+        if catalog_target is not None:
+            seed_raw_storage(paths, settings.current_dir / "storage")
+            build_logger.info(
+                "Raw storage seeded from promoted build",
+                event_code="raw_storage_seeded",
+                stage="ingestion",
+                status="completed",
+            )
         build_logger.info(
             "Ingestion started",
             event_code="ingestion_started",

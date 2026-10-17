@@ -58,6 +58,9 @@ models:
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_genres
     description: One row per title and genre, grain (tconst, genre).
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination: [tconst, genre]}
     columns:
       - name: tconst
         description: Title key.
@@ -69,6 +72,9 @@ models:
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_credits
     description: One row per ordered principal title credit, grain (tconst, ordering).
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination: [tconst, ordering]}
     columns:
       - name: tconst
         description: Title key.
@@ -87,6 +93,9 @@ models:
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_crew
     description: One row per title, crew role, and person, grain (tconst, crew_role, nconst).
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination: [tconst, crew_role, nconst]}
     columns:
       - name: tconst
         description: Title key.
@@ -102,12 +111,27 @@ models:
       - {name: dlt_load_id, description: Raw ingestion lineage., data_tests: [not_null]}
   - name: bridge_title_akas
     description: Typed alternate-title bridge, grain (tconst, ordering).
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination: [tconst, ordering]}
     columns:
       - name: tconst
         description: Title key.
         data_tests:
           - relationships_with_max_orphan_ratio:
-              arguments: {to: "ref('dim_titles')", field: tconst}
+              arguments:
+                to: "ref('dim_titles')"
+                field: tconst
+                # IMDb's daily title.akas.tsv.gz and title.basics.tsv.gz exports aren't a single
+                # atomic snapshot (observed different x-amz-meta-run-date values across files in
+                # the same pipeline run), so akas rows for very recently added titles can briefly
+                # reference a tconst not yet present in that day's basics export. A real run
+                # against the full dataset measured ~0.02% orphaned (11,851 of 59,304,362 rows) -
+                # comfortably normal drift, not a data-quality regression. The macro's strict
+                # 0.0001 (0.01%) default is tuned for same-source relationships, not cross-file
+                # staleness; 0.001 (0.1%) leaves ~5x headroom above the observed ratio while still
+                # catching a genuine regression.
+                max_orphan_ratio: 0.001
       - {name: ordering, description: Alternate-title ordering.}
       - {name: title, description: Alternate title text.}
       - {name: region, description: Optional region code.}
