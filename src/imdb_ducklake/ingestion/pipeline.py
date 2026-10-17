@@ -132,6 +132,9 @@ def ingest_snapshot(
                 "load.workers": workers,
                 "normalize.workers": workers,
                 "normalize.parquet_normalizer.add_dlt_load_id": True,
+                # Drop each package's parquet files once loaded; otherwise every build leaves
+                # ~2.6GB behind in pipelines_dir that nothing reads again.
+                "load.delete_completed_jobs": True,
             }
         ):
             load_info = pipeline.run(

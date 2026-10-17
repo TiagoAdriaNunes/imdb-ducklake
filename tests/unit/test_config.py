@@ -53,6 +53,19 @@ def test_settings_resolve_environment_values_from_root(tmp_path, monkeypatch) ->
     assert settings.catalog_url == "postgresql://imdb:secret@postgres:5432/ducklake_catalog"
 
 
+def test_scratch_dir_moves_dbt_and_dlt_working_files(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.setenv("IMDB_DUCKLAKE_SCRATCH_DIR", "scratch")
+
+    settings = Settings.load(repository_root=root)
+
+    assert settings.dbt_state_dir == root.resolve() / "scratch" / ".dbt"
+    assert settings.dlt_pipelines_dir == root.resolve() / "scratch" / ".dlt" / "pipelines"
+    assert settings.current_dir == settings.data_dir / "ducklake" / "current"
+
+
 def test_environment_defaults_to_local(tmp_path) -> None:
     root = tmp_path / "project"
     root.mkdir()
