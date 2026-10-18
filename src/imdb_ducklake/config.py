@@ -53,9 +53,8 @@ class Settings:
     ingest_workers: int = 2
     ingest_chunk_size: int = 50_000
     # Per-build scratch space: dbt's controller DuckDB file (DuckDB spills large sorts/joins into a
-    # `.tmp` dir next to it) and dlt's load packages. Defaults to data_dir. In Docker this should be
-    # container-local disk, not the ./data bind mount - a Windows-host mount is very slow for the
-    # tens of GB written here per build.
+    # `.tmp` dir next to it) and dlt's load packages. Defaults to data_dir. `build` empties it
+    # before and after each run.
     scratch_dir: Path | None = None
 
     @classmethod

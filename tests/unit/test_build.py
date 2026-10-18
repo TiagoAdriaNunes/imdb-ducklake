@@ -491,6 +491,40 @@ def test_postgresql_build_failure_leaves_staged_build_for_retry(tmp_path, monkey
     assert not settings.current_dir.exists()
 
 
+def test_build_clears_scratch_before_and_after_even_when_it_fails(tmp_path, monkeypatch) -> None:
+    settings = _settings(tmp_path)
+    stale_spill = settings.dbt_state_dir / "killed.duckdb.tmp" / "spill.tmp"
+    stale_package = settings.dlt_pipelines_dir / "imdb_killed" / "load" / "rows.parquet"
+    for path in (stale_spill, stale_package):
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"stale")
+    _install_successful_stages(monkeypatch)
+    stale_seen_by_dbt = []
+
+    def failing_dbt(*_args, controller_path, **_kwargs):
+        stale_seen_by_dbt.append(stale_spill.exists() or stale_package.exists())
+        own_spill = controller_path.parent / f"{controller_path.name}.tmp"
+        own_spill.mkdir(parents=True)
+        (own_spill / "spill.tmp").write_bytes(b"spill")
+        raise TransformationError("failed dbt")
+
+    monkeypatch.setattr(build_module, "run_dbt", failing_dbt)
+
+    with pytest.raises(TransformationError):
+        build_lakehouse(
+            settings=settings,
+            downloader=FakeDownloader(),
+            dbt_executable="dbt",
+            python_executable="python",
+            environment={},
+            reserve_bytes=0,
+        )
+
+    assert stale_seen_by_dbt == [False]
+    assert not list(settings.dbt_state_dir.iterdir())
+    assert not list(settings.dlt_pipelines_dir.iterdir())
+
+
 @pytest.mark.parametrize("stage", ["acquisition", "ingestion", "dbt", "validation", "promotion"])
 def test_every_stage_failure_preserves_current_build(stage, tmp_path, monkeypatch) -> None:
     settings = _settings(tmp_path)

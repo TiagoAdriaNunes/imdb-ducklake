@@ -39,12 +39,11 @@ services:
       # Docker Desktop currently exposes about 8GB. Leave headroom for Python, dbt, dlt, and WSL;
       # exceeding the cgroup limit makes Linux SIGKILL dbt with exit code -9.
       IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT: ${IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT:-6GB}
-      # Per-build scratch (DuckDB spill, 10GB+ for mart_person_filmography, and dlt load packages)
-      # on Docker-managed disk instead of the ./data bind mount, which is slow on Windows hosts.
-      IMDB_DUCKLAKE_SCRATCH_DIR: /scratch
+      # Per-build scratch (DuckDB spill, dlt load packages), emptied before and after each build.
+      # On the host disk, not a Docker volume: Docker's disk file never shrinks after deletes.
+      IMDB_DUCKLAKE_SCRATCH_DIR: /data/.scratch
     volumes:
       - ./data:/data
-      - scratch:/scratch
 
   app:
     build:
@@ -84,4 +83,3 @@ services:
 
 volumes:
   postgres-data:
-  scratch:

@@ -122,7 +122,6 @@ models:
       contract: {enforced: true}
     columns:
       - {name: tconst, data_type: varchar, description: Title key., data_tests: [not_null]}
-      - {name: primary_title, data_type: varchar, description: Title text.}
       - {name: nconst, data_type: varchar, description: Person key.}
       - {name: primary_name, data_type: varchar, description: Person display name.}
       - {name: category, data_type: varchar, description: "actor, actress, or self."}

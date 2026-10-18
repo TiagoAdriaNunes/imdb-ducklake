@@ -194,7 +194,7 @@ def _build_fixture_lakehouse(current_dir: Path) -> None:
     connection.execute(
         """
         create table marts.mart_title_cast as
-        select tconst, primary_title, nconst, primary_name, category, ordering, characters
+        select tconst, nconst, primary_name, category, ordering, characters
         from marts.mart_person_filmography
         where category in ('actor', 'actress', 'self')
         """

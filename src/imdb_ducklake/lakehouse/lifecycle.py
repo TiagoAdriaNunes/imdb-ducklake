@@ -404,6 +404,29 @@ def prune_obsolete_builds(
     return tuple(removed)
 
 
+def clear_scratch(*directories: Path) -> tuple[Path, ...]:
+    """Empty build scratch directories (dbt spill, dlt load packages).
+
+    Callers must hold the lakehouse build lock.
+    """
+    removed: list[Path] = []
+    for directory in directories:
+        if not directory.exists():
+            continue
+        try:
+            for path in directory.iterdir():
+                if path.is_symlink():
+                    raise LifecycleError(f"Refusing to clear symbolic link {path}")
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                removed.append(path)
+        except OSError as error:
+            raise LifecycleError(f"Could not clear scratch directory {directory}") from error
+    return tuple(removed)
+
+
 def select_staged_build(
     lakehouse_dir: Path,
     *,
