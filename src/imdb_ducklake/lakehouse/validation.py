@@ -64,6 +64,7 @@ REQUIRED_RELATIONS: dict[str, frozenset[str]] = {
             "mart_genre_year_summary",
             "mart_person_filmography",
             "mart_series_episodes",
+            "mart_title_cast",
             "mart_title_search",
             "mart_top_titles",
             "mart_top_movies",
@@ -259,6 +260,10 @@ def _validate_read_only(
                 """
                 select nconst, tconst, category, characters
                 from imdb_lake.marts.mart_person_filmography limit 1
+                """,
+                """
+                select tconst, primary_title, nconst, category, characters
+                from imdb_lake.marts.mart_title_cast limit 1
                 """,
                 """
                 select series_tconst, episode_tconst, season_number, episode_number

@@ -40,10 +40,3 @@ from person_credits as credits
 inner join {{ ref('dim_people') }} as people using (nconst)
 inner join {{ ref('dim_titles') }} as titles using (tconst)
 left join {{ ref('fct_title_ratings') }} as ratings using (tconst)
--- Physically clusters rows by tconst so a remote `WHERE tconst = $tconst` lookup (title_cast.sql)
--- can prune most Parquet row groups via min/max stats instead of scanning the whole table -
--- unsorted, a single title's credits could land in any of this table's ~125M rows (see ADR 0013).
--- Sorted on tconst alone: that's the only key pruning needs, and title_cast.sql already applies
--- its own `order by ordering, nconst` over the handful of matched rows, so sorting on those here
--- too would only add cost to this table's full-table sort without changing what any reader sees.
-order by credits.tconst

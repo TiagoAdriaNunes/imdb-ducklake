@@ -206,7 +206,7 @@ make build
 
 The command acquires the single-writer lock, reuses or downloads all seven verified archives,
 checks free space, creates an isolated build, runs dlt ingestion and `dbt build`, and validates all
-31 required relations through a new process with a read-only DuckLake attachment. Only then does
+34 required relations through a new process with a read-only DuckLake attachment. Only then does
 it atomically replace `data/ducklake/current/`; any earlier failure leaves the existing current
 build unchanged. Only the latest DuckLake snapshot is kept. Locally, the previous build is
 retained for rollback; with PostgreSQL, old builds are removed after each successful build.
