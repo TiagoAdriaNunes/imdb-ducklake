@@ -433,7 +433,10 @@ def test_space_check_does_not_require_room_for_data_already_on_disk(tmp_path, mo
         log=build_module.logger,
     )
 
-    with pytest.raises(LifecycleError, match=r"downloads 10 \+ new build 100 \+ reserve 0"):
+    with pytest.raises(
+        LifecycleError,
+        match=r"downloads 10 \+ seeded raw 0 \+ new build 100 \+ spill 0 \+ reserve 0",
+    ):
         build_module._check_space(
             settings,
             download_bytes=10,
@@ -550,3 +553,37 @@ def test_every_stage_failure_preserves_current_build(stage, tmp_path, monkeypatc
         assert len(staged_builds) == 1
         assert (staged_builds[0] / "catalog.duckdb").read_text(encoding="utf-8") == "catalog"
         assert (staged_builds[0] / "storage" / "rows.parquet").read_text(encoding="utf-8") == "rows"
+
+
+def test_space_check_counts_seeded_raw_and_spill_for_postgresql_docker(
+    tmp_path, monkeypatch
+) -> None:
+    base = _settings(tmp_path)
+    settings = Settings(
+        repository_root=base.repository_root,
+        data_dir=base.data_dir,
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+        scratch_dir=tmp_path / "scratch",
+    )
+    current_raw = settings.current_dir / "storage" / "raw"
+    current_raw.mkdir(parents=True)
+    (current_raw / "a.parquet").write_bytes(b"x" * 30)
+    staged_raw = settings.lakehouse_dir / "builds" / "staged" / "storage" / "raw"
+    staged_raw.mkdir(parents=True)
+    (staged_raw / "b.parquet").write_bytes(b"x" * 20)
+    monkeypatch.setattr(
+        lifecycle.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=1_000, used=1_000, free=0),
+    )
+
+    # seed 30 + 20, new build max(1 * 4, current 30) = 30, spill = current 30
+    with pytest.raises(LifecycleError, match=r"seeded raw 50 \+ new build 30 \+ spill 30"):
+        build_module._check_space(
+            settings,
+            download_bytes=0,
+            raw_bytes=1,
+            reserve_bytes=0,
+            temporary_size_factor=4,
+            log=build_module.logger,
+        )

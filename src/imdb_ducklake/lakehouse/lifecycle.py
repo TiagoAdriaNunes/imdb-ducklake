@@ -82,6 +82,8 @@ class SpaceBudget:
     download_bytes: int
     temporary_build_bytes: int
     reserve_bytes: int = 0
+    seed_bytes: int = 0
+    spill_bytes: int = 0
 
     def __post_init__(self) -> None:
         values = asdict(self)
@@ -90,7 +92,13 @@ class SpaceBudget:
 
     @property
     def required_bytes(self) -> int:
-        return self.download_bytes + self.temporary_build_bytes + self.reserve_bytes
+        return (
+            self.download_bytes
+            + self.seed_bytes
+            + self.temporary_build_bytes
+            + self.spill_bytes
+            + self.reserve_bytes
+        )
 
 
 def ensure_free_space(path: Path, budget: SpaceBudget) -> int:
@@ -103,8 +111,9 @@ def ensure_free_space(path: Path, budget: SpaceBudget) -> int:
     if free_bytes < budget.required_bytes:
         raise LifecycleError(
             f"Insufficient free space at {probe}: required {budget.required_bytes:,} bytes "
-            f"(downloads {budget.download_bytes:,} + new build "
-            f"{budget.temporary_build_bytes:,} + reserve {budget.reserve_bytes:,}), "
+            f"(downloads {budget.download_bytes:,} + seeded raw {budget.seed_bytes:,} + new build "
+            f"{budget.temporary_build_bytes:,} + spill {budget.spill_bytes:,} + reserve "
+            f"{budget.reserve_bytes:,}), "
             f"available {free_bytes:,} bytes"
         )
     return free_bytes
