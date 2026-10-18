@@ -116,6 +116,18 @@ models:
       - {name: average_rating, data_type: double, description: Optional title rating.}
       - {name: num_votes, data_type: bigint, description: Optional title vote count.}
       - {name: dlt_load_id, data_type: varchar, description: Raw credit lineage., data_tests: [not_null]}
+  - name: mart_title_cast
+    description: Cast credits (actor, actress, self) per title, sorted by tconst for the app's title lookups, grain (tconst, ordering).
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: tconst, data_type: varchar, description: Title key., data_tests: [not_null]}
+      - {name: primary_title, data_type: varchar, description: Title text.}
+      - {name: nconst, data_type: varchar, description: Person key.}
+      - {name: primary_name, data_type: varchar, description: Person display name.}
+      - {name: category, data_type: varchar, description: "actor, actress, or self."}
+      - {name: ordering, data_type: integer, description: IMDb principal-credit ordering.}
+      - {name: characters, data_type: "varchar[]", description: "Character name array, if applicable."}
   - name: mart_series_episodes
     description: Series, season, and episode navigation with optional rating measures, grain episode_tconst.
     config:
