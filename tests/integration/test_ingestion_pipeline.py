@@ -211,6 +211,9 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
             "WHERE nconst = 'nm0001' AND tconst = 'tt0001' ORDER BY category"
         ).fetchall() == [("actor",), ("director",), ("writer",)]
         assert connection.execute(
+            "SELECT tconst, nconst, category, characters FROM imdb_lake.marts.mart_title_cast"
+        ).fetchall() == [("tt0001", "nm0001", "actor", ["Hero"])]
+        assert connection.execute(
             "SELECT series_tconst, episode_tconst, season_number, episode_number "
             "FROM imdb_lake.marts.mart_series_episodes"
         ).fetchone() == ("tt0001", "tt0002", 1, 1)
@@ -245,7 +248,7 @@ def test_one_command_builds_validates_and_promotes_fixture_snapshot(tmp_path) ->
     )
 
     assert result.promoted.current_dir == settings.current_dir
-    assert result.validation.relation_count == 33
+    assert result.validation.relation_count == 34
     assert result.validation.mart_row_counts["mart_title_search"] == 2
     assert result.promoted.previous_dir is not None
     assert (result.promoted.previous_dir / "previous.txt").read_text(encoding="utf-8") == (

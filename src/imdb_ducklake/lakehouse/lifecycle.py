@@ -135,7 +135,7 @@ def initialize_build(paths: BuildPaths) -> None:
 
 
 def seed_raw_storage(build_paths: BuildPaths, current_storage_dir: Path) -> None:
-    """Copy a promoted build's ``raw/`` Parquet forward into a fresh isolated build.
+    """Copy ``raw/`` Parquet from the promoted and any unpromoted builds into a fresh build.
 
     PostgreSQL-backed builds share one persistent metadata catalog across every build (ADR 0012);
     only the storage directory is isolated per build. dlt's own bookkeeping tables (``_dlt_loads``,
@@ -147,11 +147,16 @@ def seed_raw_storage(build_paths: BuildPaths, current_storage_dir: Path) -> None
     ``ducklake_delete_orphaned_files`` checkpoint step reclaims that space after promotion.
     No-op when there is no promoted build yet (the first-ever build).
     """
-    source = current_storage_dir / "raw"
-    if not source.is_dir():
-        return
+    # Unpromoted builds too: an interrupted one may hold the catalog's live raw files.
+    staged = [
+        path / "storage" / "raw"
+        for path in sorted(_safe_child_directories(build_paths.temporary_dir.parent))
+        if path != build_paths.temporary_dir
+    ]
+    sources = [path for path in (current_storage_dir / "raw", *staged) if path.is_dir()]
     try:
-        shutil.copytree(source, build_paths.storage_dir / "raw", dirs_exist_ok=True)
+        for source in sources:
+            shutil.copytree(source, build_paths.storage_dir / "raw", dirs_exist_ok=True)
     except OSError as error:
         raise LifecycleError(
             f"Could not seed raw storage for {build_paths.temporary_dir}"

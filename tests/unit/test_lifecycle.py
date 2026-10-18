@@ -20,6 +20,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
+    seed_raw_storage,
     select_staged_build,
     temporary_build,
 )
@@ -412,3 +413,21 @@ def test_incomplete_build_cannot_be_promoted(tmp_path) -> None:
 
     assert paths.temporary_dir.exists()
     assert not paths.current_dir.exists()
+
+
+def test_seed_raw_storage_also_copies_raw_from_unpromoted_builds(tmp_path) -> None:
+    root = tmp_path / "ducklake"
+    current_raw = root / "current" / "storage" / "raw" / "title_basics"
+    current_raw.mkdir(parents=True)
+    (current_raw / "promoted.parquet").write_text("promoted", encoding="utf-8")
+    interrupted = BuildPaths.create(root, build_id="20260101T000000Z-interrupted1")
+    interrupted_raw = interrupted.storage_dir / "raw" / "title_basics"
+    interrupted_raw.mkdir(parents=True)
+    (interrupted_raw / "live.parquet").write_text("live", encoding="utf-8")
+    paths = BuildPaths.create(root, build_id="20260102T000000Z-newbuild0001")
+    initialize_build(paths)
+
+    seed_raw_storage(paths, root / "current" / "storage")
+
+    seeded = paths.storage_dir / "raw" / "title_basics"
+    assert sorted(path.name for path in seeded.iterdir()) == ["live.parquet", "promoted.parquet"]
