@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +30,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     checkpoint_catalog_target,
     checkpoint_lakehouse,
     cleanup_build,
+    clear_scratch,
     ensure_free_space,
     initialize_build,
     promote_build,
@@ -93,7 +95,7 @@ def build_lakehouse(
         status="waiting",
         path=str(lock_path),
     )
-    with BuildLock(lock_path):
+    with BuildLock(lock_path), _scratch_cleared(settings, build_logger):
         build_logger.info(
             "Build lock acquired",
             event_code="build_lock_acquired",
@@ -311,6 +313,41 @@ def build_lakehouse(
     return BuildResult(artifacts, ingestion, transformation, validation, promoted)
 
 
+@contextmanager
+def _scratch_cleared(settings: Settings, log: Logger) -> Iterator[None]:
+    """Clear scratch before the build (a killed build's leftovers) and after it, even on failure."""
+    _clear_scratch(settings, log)
+    try:
+        yield
+    finally:
+        _clear_scratch(settings, log)
+
+
+def _clear_scratch(settings: Settings, log: Logger) -> None:
+    directories = (settings.dbt_state_dir, settings.dlt_pipelines_dir)
+    try:
+        freed_bytes = sum(_directory_size(directory) for directory in directories)
+        removed = clear_scratch(*directories)
+    except LifecycleError as error:
+        log.warning(
+            "Scratch could not be cleared",
+            event_code="scratch_clear_failed",
+            stage="lifecycle",
+            status="failed",
+            error=str(error),
+        )
+        return
+    if removed:
+        log.info(
+            "Scratch cleared",
+            event_code="scratch_cleared",
+            stage="lifecycle",
+            status="completed",
+            count=len(removed),
+            bytes=freed_bytes,
+        )
+
+
 def _prune_after_shared_catalog_build(settings: Settings, log: Logger) -> None:
     """Remove retired and unpromoted builds; safe once the checkpoint expired old snapshots."""
     try:
@@ -352,8 +389,7 @@ def _check_space(
         if settings.catalog_url is not None
         else 0
     )
-    # A separate scratch volume (Docker) reports its own virtual free space, not the host disk's,
-    # so DuckDB spill is budgeted here against data_dir.
+    # Docker puts DuckDB spill in scratch_dir (data/.scratch), on data_dir's disk.
     spill_bytes = current_bytes if settings.scratch_dir is not None else 0
     budget = SpaceBudget(
         download_bytes=download_bytes,

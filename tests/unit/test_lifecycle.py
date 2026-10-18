@@ -314,6 +314,20 @@ def test_prunes_orphaned_builds_and_keeps_newest_retired(tmp_path) -> None:
     assert new_retired.is_dir()
 
 
+def test_clear_scratch_empties_directories_and_skips_missing_ones(tmp_path) -> None:
+    dbt_state = tmp_path / ".dbt"
+    spill = dbt_state / "killed.duckdb.tmp"
+    spill.mkdir(parents=True)
+    (spill / "duckdb_temp_storage-0.tmp").write_bytes(b"spill")
+    (dbt_state / "killed.duckdb").write_bytes(b"controller")
+
+    removed = lifecycle.clear_scratch(dbt_state, tmp_path / "missing")
+
+    assert set(removed) == {spill, dbt_state / "killed.duckdb"}
+    assert dbt_state.is_dir()
+    assert not list(dbt_state.iterdir())
+
+
 def test_selects_one_complete_staged_build_or_requires_an_id(tmp_path) -> None:
     root = tmp_path / "ducklake"
     with pytest.raises(LifecycleError, match="No staged"):

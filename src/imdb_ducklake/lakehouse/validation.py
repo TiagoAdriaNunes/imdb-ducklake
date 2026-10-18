@@ -262,7 +262,7 @@ def _validate_read_only(
                 from imdb_lake.marts.mart_person_filmography limit 1
                 """,
                 """
-                select tconst, primary_title, nconst, category, characters
+                select tconst, nconst, category, characters
                 from imdb_lake.marts.mart_title_cast limit 1
                 """,
                 """

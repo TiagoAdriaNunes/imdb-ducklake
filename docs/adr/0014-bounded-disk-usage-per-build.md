@@ -16,6 +16,10 @@ archives that were already on disk.
 - In PostgreSQL mode, retired and unpromoted builds are removed after a successful promotion and
   checkpoint, never before.
 - The free-space gate counts only new writes: downloads, the estimated new build, and a reserve.
+- `build` empties the scratch directory (dbt spill, dlt load packages) before it starts and when it
+  ends, even on failure. A killed build's leftovers go at the next build.
+- In Docker, scratch is `data/.scratch` on the host disk, not a Docker volume: a volume lives in
+  Docker's disk file, which grows with each spill and never shrinks after deletes.
 
 ## Consequences
 
