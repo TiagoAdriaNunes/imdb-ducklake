@@ -12,3 +12,4 @@ select
     directors_text as "Directors",
     writers_text as "Writers"
 from marts.mart_top_tv_series
+order by title_rank

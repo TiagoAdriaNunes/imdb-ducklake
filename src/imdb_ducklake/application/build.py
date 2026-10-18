@@ -143,17 +143,8 @@ def build_lakehouse(
             temporary_size_factor=temporary_size_factor,
             log=build_logger,
         )
-        # PostgreSQL mode only: the shared catalog is cumulative across every build attempt (ADR
-        # 0012), so an earlier attempt's ingestion or dbt run can commit table snapshots pointing
-        # at files under its own builds/<id>/storage even though that attempt never promoted (a
-        # failed dbt test, a crash, anything short of full success). Deleting that directory here
-        # - on the very next build attempt, before this one has even started - orphans the
-        # catalog's own live references to those files, breaking reads (including the live app)
-        # for every table the earlier attempt touched, not just its own. Only
-        # ducklake_delete_orphaned_files (wired into checkpoint, and genuinely catalog-aware) can
-        # safely tell which physical files nothing references any more; directory-level pruning
-        # cannot make that determination for a shared catalog and must not run here in this
-        # mode; it runs after promotion instead.
+        # Not in PostgreSQL mode: an unpromoted build may hold the catalog's live files (ADR
+        # 0012). Those builds are pruned after promotion instead.
         if catalog_target is None:
             removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
             if removed:
@@ -355,10 +346,21 @@ def _check_space(
     # current/ only sizes the estimate; promotion renames it, so it needs no free space.
     current_bytes = _directory_size(settings.current_dir)
     estimated_temporary_bytes = max(raw_bytes * temporary_size_factor, current_bytes)
+    # PostgreSQL builds copy raw from current/ and unpromoted builds (seed_raw_storage).
+    seed_bytes = (
+        sum(_directory_size(path) for path in _seed_sources(settings))
+        if settings.catalog_url is not None
+        else 0
+    )
+    # A separate scratch volume (Docker) reports its own virtual free space, not the host disk's,
+    # so DuckDB spill is budgeted here against data_dir.
+    spill_bytes = current_bytes if settings.scratch_dir is not None else 0
     budget = SpaceBudget(
         download_bytes=download_bytes,
         temporary_build_bytes=estimated_temporary_bytes,
         reserve_bytes=reserve_bytes,
+        seed_bytes=seed_bytes,
+        spill_bytes=spill_bytes,
     )
     free_bytes = ensure_free_space(settings.data_dir, budget)
     log.info(
@@ -368,10 +370,21 @@ def _check_space(
         status="completed",
         required_bytes=budget.required_bytes,
         download_bytes=budget.download_bytes,
+        seed_bytes=budget.seed_bytes,
         temporary_build_bytes=budget.temporary_build_bytes,
+        spill_bytes=budget.spill_bytes,
         reserve_bytes=budget.reserve_bytes,
         available_bytes=free_bytes,
     )
+
+
+def _seed_sources(settings: Settings) -> list[Path]:
+    builds = settings.lakehouse_dir / "builds"
+    staged = sorted(builds.iterdir()) if builds.is_dir() else []
+    return [
+        settings.current_dir / "storage" / "raw",
+        *(path / "storage" / "raw" for path in staged),
+    ]
 
 
 def _directory_size(path: Path) -> int:
