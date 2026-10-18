@@ -330,7 +330,7 @@ def promote_command(
             "--prune",
             help=(
                 "After successful promotion and validation, remove other staged builds and "
-                "retain only the newest rollback build."
+                "retain only the newest rollback build (none with a PostgreSQL catalog)."
             ),
         ),
     ] = False,
@@ -391,11 +391,11 @@ def promote_command(
                     working_directory=settings.repository_root,
                     catalog_target=promoted_catalog_target,
                 )
-            # PostgreSQL mode only: skip pruning here too - see build_lakehouse's identical
-            # guard for why blind builds/<id> deletion is unsafe once the catalog is shared.
+            # PostgreSQL mode keeps no rollback build.
+            keep_retired = 1 if staged_catalog_target is None else 0
             removed = (
-                prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
-                if prune and staged_catalog_target is None
+                prune_obsolete_builds(settings.lakehouse_dir, keep_retired=keep_retired)
+                if prune
                 else ()
             )
         typer.echo(
@@ -406,9 +406,8 @@ def promote_command(
         for relation, row_count in sorted(current_validation.mart_row_counts.items()):
             typer.echo(f"  marts.{relation}: {row_count:,} rows")
         if prune:
-            typer.echo(
-                f"Pruned {len(removed)} obsolete build workspace(s); retained one rollback build."
-            )
+            retained = "one rollback build" if keep_retired else "no rollback build"
+            typer.echo(f"Pruned {len(removed)} obsolete build workspace(s); retained {retained}.")
     except ImdbLakehouseError as error:
         _exit_with_error(error)
 
@@ -535,7 +534,7 @@ def checkpoint_command(
             stage="checkpoint",
             status="completed",
             elapsed_seconds=elapsed_seconds,
-            orphaned_files_removed=len(removed_files),
+            files_removed=len(removed_files),
         )
         target_label = (
             "shared PostgreSQL-backed lakehouse"
@@ -545,7 +544,8 @@ def checkpoint_command(
         typer.echo(f"Checkpointed {target_label} in {elapsed_seconds:.2f} seconds.")
         if removed_files:
             typer.echo(
-                f"Removed {len(removed_files)} orphaned data file(s) never committed by a snapshot."
+                f"Removed {len(removed_files)} data file(s) no longer referenced by the latest "
+                "snapshot."
             )
     except ImdbLakehouseError as error:
         checkpoint_logger.error(

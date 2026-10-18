@@ -10,12 +10,14 @@ from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import (
     AcquisitionError,
     IngestionError,
+    LifecycleError,
     PromotionError,
     TransformationError,
     ValidationError,
 )
 from imdb_ducklake.ingestion.pipeline import IngestionResult
 from imdb_ducklake.ingestion.progress import StructuredLogCollector
+from imdb_ducklake.lakehouse import lifecycle
 from imdb_ducklake.lakehouse.validation import ValidationResult
 from imdb_ducklake.observability import configure_logging, start_run_context
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult
@@ -304,32 +306,30 @@ def test_postgresql_first_build_has_no_raw_storage_to_seed(tmp_path, monkeypatch
     )
 
 
-def test_postgresql_build_never_prunes_other_staged_builds(tmp_path, monkeypatch) -> None:
-    """The shared Postgres catalog is cumulative across every build attempt (ADR 0012): an
-    earlier attempt's ingestion or dbt run can commit table snapshots pointing at files under its
-    own builds/<id>/storage even though it never promoted. Deleting that directory on a later
-    build attempt orphans the catalog's own live references to those files - breaking reads
-    (including the live Shiny app) for every table the earlier attempt touched. Only
-    ducklake_delete_orphaned_files (wired into checkpoint) can safely tell what's truly
-    unreferenced, so prune_obsolete_builds must never run in this mode, not even implicitly."""
+def _postgresql_settings(tmp_path) -> Settings:
     base = _settings(tmp_path)
-    settings = Settings(
+    return Settings(
         repository_root=base.repository_root,
         data_dir=base.data_dir,
         catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
     )
-    stale = settings.lakehouse_dir / "builds" / "20260101T000000Z-stale0000001"
-    (stale / "storage").mkdir(parents=True)
-    (stale / "storage" / "marker.txt").write_text("still needed by the catalog", encoding="utf-8")
-    downloader = FakeDownloader()
 
+
+def _install_postgresql_stages(monkeypatch, *, on_ingest=None, on_checkpoint=None) -> None:
     def ingest(
         artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
     ):
+        if on_ingest is not None:
+            on_ingest()
         (catalog_target.storage_dir / "raw.parquet").write_text("raw", encoding="utf-8")
         return IngestionResult(
             "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir
         )
+
+    def checkpoint(*_args, **_kwargs):
+        if on_checkpoint is not None:
+            on_checkpoint()
+        return ()
 
     monkeypatch.setattr(build_module, "ingest_snapshot", ingest)
     monkeypatch.setattr(
@@ -340,25 +340,108 @@ def test_postgresql_build_never_prunes_other_staged_builds(tmp_path, monkeypatch
         "validate_build",
         lambda paths, **_kwargs: ValidationResult(paths.build_id, 31, {"mart": 1}),
     )
-    monkeypatch.setattr(build_module, "checkpoint_catalog_target", lambda *_a, **_kw: ())
-    monkeypatch.setattr(
-        build_module,
-        "prune_obsolete_builds",
-        lambda *_a, **_kw: pytest.fail("prune_obsolete_builds must not run in PostgreSQL mode"),
+    monkeypatch.setattr(build_module, "checkpoint_catalog_target", checkpoint)
+
+
+def test_postgresql_build_prunes_only_after_promotion_and_checkpoint(tmp_path, monkeypatch) -> None:
+    """Stale builds survive ingest and checkpoint, then are removed with retired/."""
+    settings = _postgresql_settings(tmp_path)
+    stale = settings.lakehouse_dir / "builds" / "20260101T000000Z-stale0000001"
+    (stale / "storage").mkdir(parents=True)
+    (stale / "storage" / "marker.txt").write_text("needed until checkpoint", encoding="utf-8")
+    old_retired = settings.lakehouse_dir / "retired" / "20260101T000000Z-old000000001-previous-x"
+    old_retired.mkdir(parents=True)
+    (settings.current_dir / "storage").mkdir(parents=True)
+    seen: list[str] = []
+
+    def still_staged(stage: str):
+        def check() -> None:
+            assert (stale / "storage" / "marker.txt").is_file()
+            seen.append(stage)
+
+        return check
+
+    _install_postgresql_stages(
+        monkeypatch,
+        on_ingest=still_staged("ingest"),
+        on_checkpoint=still_staged("checkpoint"),
     )
 
-    build_lakehouse(
+    result = build_lakehouse(
         settings=settings,
-        downloader=downloader,
+        downloader=FakeDownloader(),
         dbt_executable="dbt",
         python_executable="python",
         environment={},
         reserve_bytes=0,
     )
 
-    assert (stale / "storage" / "marker.txt").read_text(encoding="utf-8") == (
-        "still needed by the catalog"
+    assert seen == ["ingest", "checkpoint"]
+    assert (settings.current_dir / "storage" / "raw.parquet").is_file()
+    assert result.promoted.previous_dir is not None
+    assert not list((settings.lakehouse_dir / "builds").iterdir())
+    assert not list((settings.lakehouse_dir / "retired").iterdir())
+
+
+def test_postgresql_build_prune_failure_does_not_fail_a_promoted_build(
+    tmp_path, monkeypatch
+) -> None:
+    settings = _postgresql_settings(tmp_path)
+    _install_postgresql_stages(monkeypatch)
+
+    def fail_prune(*_args, **_kwargs):
+        raise LifecycleError("disk said no")
+
+    monkeypatch.setattr(build_module, "prune_obsolete_builds", fail_prune)
+    stream = StringIO()
+    configure_logging("INFO", "json", stream=stream)
+
+    result = build_lakehouse(
+        settings=settings,
+        downloader=FakeDownloader(),
+        dbt_executable="dbt",
+        python_executable="python",
+        environment={},
+        reserve_bytes=0,
     )
+
+    assert (result.promoted.current_dir / "storage" / "raw.parquet").is_file()
+    event_codes = {
+        json.loads(line)["record"]["extra"].get("event_code")
+        for line in stream.getvalue().splitlines()
+    }
+    assert "obsolete_builds_prune_failed" in event_codes
+
+
+def test_space_check_does_not_require_room_for_data_already_on_disk(tmp_path, monkeypatch) -> None:
+    """current/ and downloaded archives need no extra free space."""
+    settings = _settings(tmp_path)
+    settings.current_dir.mkdir(parents=True)
+    (settings.current_dir / "data.parquet").write_bytes(b"x" * 100)
+    monkeypatch.setattr(
+        lifecycle.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=1_000, used=900, free=100),
+    )
+
+    build_module._check_space(
+        settings,
+        download_bytes=0,
+        raw_bytes=10,
+        reserve_bytes=0,
+        temporary_size_factor=4,
+        log=build_module.logger,
+    )
+
+    with pytest.raises(LifecycleError, match=r"downloads 10 \+ new build 100 \+ reserve 0"):
+        build_module._check_space(
+            settings,
+            download_bytes=10,
+            raw_bytes=10,
+            reserve_bytes=0,
+            temporary_size_factor=4,
+            log=build_module.logger,
+        )
 
 
 def test_postgresql_build_failure_leaves_staged_build_for_retry(tmp_path, monkeypatch) -> None:

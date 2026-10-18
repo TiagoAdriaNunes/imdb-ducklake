@@ -77,10 +77,9 @@ class BuildPaths:
 
 @dataclass(frozen=True, slots=True)
 class SpaceBudget:
-    """Conservative free-space requirement for one build attempt."""
+    """Free space one build attempt needs for new writes."""
 
-    raw_archives_bytes: int
-    current_build_bytes: int
+    download_bytes: int
     temporary_build_bytes: int
     reserve_bytes: int = 0
 
@@ -91,12 +90,7 @@ class SpaceBudget:
 
     @property
     def required_bytes(self) -> int:
-        return (
-            self.raw_archives_bytes
-            + self.current_build_bytes
-            + self.temporary_build_bytes
-            + self.reserve_bytes
-        )
+        return self.download_bytes + self.temporary_build_bytes + self.reserve_bytes
 
 
 def ensure_free_space(path: Path, budget: SpaceBudget) -> int:
@@ -108,7 +102,9 @@ def ensure_free_space(path: Path, budget: SpaceBudget) -> int:
         raise LifecycleError(f"Could not inspect free space for {probe}") from error
     if free_bytes < budget.required_bytes:
         raise LifecycleError(
-            f"Insufficient free space at {probe}: required {budget.required_bytes:,} bytes, "
+            f"Insufficient free space at {probe}: required {budget.required_bytes:,} bytes "
+            f"(downloads {budget.download_bytes:,} + new build "
+            f"{budget.temporary_build_bytes:,} + reserve {budget.reserve_bytes:,}), "
             f"available {free_bytes:,} bytes"
         )
     return free_bytes
@@ -260,7 +256,7 @@ def promote_build(
 
 
 def checkpoint_lakehouse(catalog_path: Path, storage_dir: Path) -> tuple[str, ...]:
-    """Run DuckLake's CHECKPOINT, then delete any uncommitted crash-orphaned data files."""
+    """Run DuckLake's CHECKPOINT, keep only the latest snapshot, and delete unreferenced files."""
     return _checkpoint_catalog(
         metadata_path=catalog_path.resolve().as_posix(),
         storage_dir=storage_dir,
@@ -305,10 +301,15 @@ def _checkpoint_catalog(
         )
         connection.execute("USE imdb_lake")
         connection.execute("CHECKPOINT")
-        removed = connection.execute(
+        # Keep only the latest snapshot (after CHECKPOINT, which commits one of its own).
+        connection.execute("CALL ducklake_expire_snapshots('imdb_lake', older_than => now())")
+        old_files = connection.execute(
+            "CALL ducklake_cleanup_old_files('imdb_lake', cleanup_all => true)"
+        ).fetchall()
+        orphaned_files = connection.execute(
             "CALL ducklake_delete_orphaned_files('imdb_lake', dry_run => false)"
         ).fetchall()
-        return tuple(row[0] for row in removed)
+        return tuple(row[0] for row in (*old_files, *orphaned_files))
     except Exception as error:
         raise LifecycleError(
             f"Could not checkpoint the DuckLake catalog: {type(error).__name__}: {error}"

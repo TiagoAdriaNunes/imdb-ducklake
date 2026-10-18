@@ -101,9 +101,12 @@ def build_lakehouse(
             status="completed",
         )
         recover_interrupted_promotion(settings.lakehouse_dir)
+        existing_raw_bytes = _directory_size(settings.raw_dir)
+        # Archives may be re-downloaded next to the old ones.
         _check_space(
             settings,
-            raw_bytes=_directory_size(settings.raw_dir),
+            download_bytes=existing_raw_bytes,
+            raw_bytes=existing_raw_bytes,
             reserve_bytes=reserve_bytes,
             temporary_size_factor=temporary_size_factor,
             log=build_logger,
@@ -134,6 +137,7 @@ def build_lakehouse(
 
         _check_space(
             settings,
+            download_bytes=0,
             raw_bytes=raw_bytes,
             reserve_bytes=reserve_bytes,
             temporary_size_factor=temporary_size_factor,
@@ -148,7 +152,8 @@ def build_lakehouse(
         # for every table the earlier attempt touched, not just its own. Only
         # ducklake_delete_orphaned_files (wired into checkpoint, and genuinely catalog-aware) can
         # safely tell which physical files nothing references any more; directory-level pruning
-        # cannot make that determination for a shared catalog and must not run in this mode.
+        # cannot make that determination for a shared catalog and must not run here in this
+        # mode; it runs after promotion instead.
         if catalog_target is None:
             removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
             if removed:
@@ -301,6 +306,9 @@ def build_lakehouse(
             )
             raise
 
+        if catalog_target is not None:
+            _prune_after_shared_catalog_build(settings, build_logger)
+
     build_logger.info(
         "Lakehouse build completed",
         event_code="lakehouse_build_completed",
@@ -312,19 +320,43 @@ def build_lakehouse(
     return BuildResult(artifacts, ingestion, transformation, validation, promoted)
 
 
+def _prune_after_shared_catalog_build(settings: Settings, log: Logger) -> None:
+    """Remove retired and unpromoted builds; safe once the checkpoint expired old snapshots."""
+    try:
+        removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=0)
+    except LifecycleError as error:
+        log.warning(
+            "Obsolete builds could not be pruned",
+            event_code="obsolete_builds_prune_failed",
+            stage="lifecycle",
+            status="failed",
+            error=str(error),
+        )
+        return
+    if removed:
+        log.info(
+            "Obsolete builds pruned",
+            event_code="obsolete_builds_pruned",
+            stage="lifecycle",
+            status="completed",
+            count=len(removed),
+        )
+
+
 def _check_space(
     settings: Settings,
     *,
+    download_bytes: int,
     raw_bytes: int,
     reserve_bytes: int,
     temporary_size_factor: int,
     log: Logger,
 ) -> None:
+    # current/ only sizes the estimate; promotion renames it, so it needs no free space.
     current_bytes = _directory_size(settings.current_dir)
     estimated_temporary_bytes = max(raw_bytes * temporary_size_factor, current_bytes)
     budget = SpaceBudget(
-        raw_archives_bytes=raw_bytes,
-        current_build_bytes=current_bytes,
+        download_bytes=download_bytes,
         temporary_build_bytes=estimated_temporary_bytes,
         reserve_bytes=reserve_bytes,
     )
@@ -335,6 +367,9 @@ def _check_space(
         stage="lifecycle",
         status="completed",
         required_bytes=budget.required_bytes,
+        download_bytes=budget.download_bytes,
+        temporary_build_bytes=budget.temporary_build_bytes,
+        reserve_bytes=budget.reserve_bytes,
         available_bytes=free_bytes,
     )
 

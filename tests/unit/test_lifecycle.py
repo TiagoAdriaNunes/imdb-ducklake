@@ -111,7 +111,7 @@ def test_temporary_build_cleans_failure_without_touching_current(tmp_path) -> No
 
 
 def test_space_budget_and_available_space_check(tmp_path, monkeypatch) -> None:
-    budget = SpaceBudget(10, 20, 30, 40)
+    budget = SpaceBudget(10, 50, 40)
     usage = SimpleNamespace(total=1_000, used=900, free=100)
     monkeypatch.setattr(lifecycle.shutil, "disk_usage", lambda _path: usage)
 
@@ -120,7 +120,7 @@ def test_space_budget_and_available_space_check(tmp_path, monkeypatch) -> None:
 
 
 def test_insufficient_or_unreadable_space_is_reported(tmp_path, monkeypatch) -> None:
-    budget = SpaceBudget(10, 20, 30, 41)
+    budget = SpaceBudget(10, 50, 41)
     usage = SimpleNamespace(total=1_000, used=900, free=100)
     monkeypatch.setattr(lifecycle.shutil, "disk_usage", lambda _path: usage)
     with pytest.raises(LifecycleError, match="Insufficient free space"):
@@ -136,7 +136,7 @@ def test_insufficient_or_unreadable_space_is_reported(tmp_path, monkeypatch) -> 
 
 def test_space_budget_rejects_negative_values() -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        SpaceBudget(0, 0, -1)
+        SpaceBudget(0, -1)
 
 
 def test_build_lock_records_owner_and_blocks_contention(tmp_path) -> None:
@@ -361,6 +361,10 @@ def test_checkpoint_lakehouse_compacts_a_real_ducklake_catalog(tmp_path) -> None
         )
         connection.execute("CREATE TABLE imdb_lake.demo AS SELECT 1 AS value")
         connection.execute("INSERT INTO imdb_lake.demo VALUES (2)")
+        # Rebuild: the old file is only in older snapshots.
+        connection.execute("CREATE TABLE imdb_lake.rebuilt AS SELECT 'old' AS value")
+        connection.execute("DROP TABLE imdb_lake.rebuilt")
+        connection.execute("CREATE TABLE imdb_lake.rebuilt AS SELECT 'new' AS value")
     finally:
         connection.close()
 
@@ -374,9 +378,23 @@ def test_checkpoint_lakehouse_compacts_a_real_ducklake_catalog(tmp_path) -> None
             f"(DATA_PATH '{storage_dir.as_posix()}', READ_ONLY)"
         )
         rows = verify.execute("SELECT value FROM imdb_lake.demo ORDER BY value").fetchall()
+        rebuilt = verify.execute("SELECT value FROM imdb_lake.rebuilt").fetchall()
+        snapshots = verify.execute("SELECT count(*) FROM ducklake_snapshots('imdb_lake')")
+        snapshot_count = snapshots.fetchone()[0]
+        referenced_files = {
+            Path(row[0]).name
+            for row in verify.execute(
+                "SELECT data_file FROM ducklake_list_files('imdb_lake', 'demo') "
+                "UNION ALL SELECT data_file FROM ducklake_list_files('imdb_lake', 'rebuilt')"
+            ).fetchall()
+        }
     finally:
         verify.close()
     assert rows == [(1,), (2,)]
+    assert rebuilt == [("new",)]
+    assert snapshot_count == 1
+    on_disk = {path.name for path in storage_dir.rglob("*.parquet")}
+    assert on_disk == referenced_files
 
 
 def test_checkpoint_lakehouse_wraps_failures_as_lifecycle_errors(tmp_path) -> None:
