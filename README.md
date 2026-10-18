@@ -208,8 +208,8 @@ The command acquires the single-writer lock, reuses or downloads all seven verif
 checks free space, creates an isolated build, runs dlt ingestion and `dbt build`, and validates all
 31 required relations through a new process with a read-only DuckLake attachment. Only then does
 it atomically replace `data/ducklake/current/`; any earlier failure leaves the existing current
-build unchanged. The previous current build is retained for rollback, and older retired or
-crash-orphaned workspaces are pruned on the next run.
+build unchanged. Only the latest DuckLake snapshot is kept. Locally, the previous build is
+retained for rollback; with PostgreSQL, old builds are removed after each successful build.
 
 `build` is intentionally all-or-nothing: any failure anywhere in the pipeline, including a late
 `dbt build` test, discards the whole isolated workspace it created — even the already-ingested raw

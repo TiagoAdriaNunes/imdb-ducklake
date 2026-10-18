@@ -390,13 +390,22 @@ def test_promote_command_validates_promotes_and_reattaches_current_postgresql(
 
     monkeypatch.setattr(cli, "validate_build", fake_validate_build)
     monkeypatch.setattr(cli, "promote_build", fake_promote)
+
+    def fake_prune(received, *, keep_retired):
+        assert received == settings.lakehouse_dir
+        assert keep_retired == 0
+        events.append("prune")
+        return ()
+
     monkeypatch.setattr(cli, "checkpoint_catalog_target", fake_checkpoint_catalog_target)
     monkeypatch.setattr(cli, "checkpoint_lakehouse", fail_local_checkpoint)
+    monkeypatch.setattr(cli, "prune_obsolete_builds", fake_prune)
 
-    result = runner.invoke(cli.app, ["promote", "--build-id", paths.build_id])
+    result = runner.invoke(cli.app, ["promote", "--build-id", paths.build_id, "--prune"])
 
     assert result.exit_code == 0
-    assert events == ["validate staged", "promote", "checkpoint", "validate current"]
+    assert events == ["validate staged", "promote", "checkpoint", "validate current", "prune"]
+    assert "retained no rollback build" in result.stdout
     assert "Promoted build fixture-build" in result.stdout
     assert "marts.mart_title_search: 2 rows" in result.stdout
 
