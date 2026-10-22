@@ -6,22 +6,22 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = { file = "LICENSE" }
 dependencies = [
-    "dbt-duckdb>=1.9,<2",
-    "dlt[ducklake]>=1.29,<2",
-    "duckdb>=1.4,<2",
-    "httpx>=0.28,<1",
-    "jinja2>=3.1,<4",
-    "loguru>=0.7,<1",
-    "rich>=14,<16",
-    "typer>=0.16,<1",
+    "dbt-duckdb>=1.9",
+    "dlt[ducklake]>=1.29",
+    "duckdb>=2",
+    "httpx>=0.28",
+    "jinja2>=3.1",
+    "loguru>=0.7",
+    "rich>=14",
+    "typer>=0.16",
 ]
 
 [project.optional-dependencies]
 app = [
-    "great-tables>=0.17,<1",
-    "itables>=2.7,<3",
-    "pandas>=2,<3",
-    "shiny>=1.4,<2",
+    "great-tables>=0.17",
+    "itables>=2.7",
+    "pandas>=2",
+    "shiny>=1.4",
 ]
 
 [project.scripts]
@@ -33,12 +33,12 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.17,<2",
+    "mypy>=1.17",
     "pre-commit>=4.6.2",
-    "pytest>=8.4,<9",
-    "pytest-cov>=6.2,<8",
-    "respx>=0.22,<1",
-    "ruff>=0.12,<1",
+    "pytest>=8.4",
+    "pytest-cov>=6.2",
+    "respx>=0.22",
+    "ruff>=0.12",
     "sqlfluff>=4.3.0",
 ]
 

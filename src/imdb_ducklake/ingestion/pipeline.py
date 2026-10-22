@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import dlt
+import duckdb
 from dlt.common.runtime.collector_base import Collector
 from dlt.common.schema import Schema
 from dlt.destinations import ducklake
@@ -116,6 +117,7 @@ def ingest_snapshot(
                 }
             )
         pipeline_options["progress"] = progress
+    _restore_relation_fetchone()
     started = time.monotonic()
 
     try:
@@ -183,6 +185,23 @@ def _validate_complete_snapshot(artifacts: tuple[VerifiedArtifact, ...]) -> None
             "A complete IMDb snapshot requires all seven datasets; "
             f"missing={missing}, unexpected={unexpected}"
         )
+
+
+def _restore_relation_fetchone() -> None:
+    """Re-add ``DuckDBPyRelation.fetchone()``, removed in DuckDB 2.0.
+
+    dlt 1.31's DuckLake client still calls it when closing a connection. Delete this once a dlt
+    release stops calling it.
+    """
+    relation = duckdb.DuckDBPyRelation
+    if hasattr(relation, "fetchone"):
+        return
+
+    def fetchone(self: duckdb.DuckDBPyRelation) -> tuple[Any, ...] | None:
+        rows = self.limit(1).fetchall()
+        return rows[0] if rows else None
+
+    setattr(relation, "fetchone", fetchone)  # noqa: B010
 
 
 def _pipeline_name(build_id: str) -> str:

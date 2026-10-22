@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import duckdb
 import pytest
 from dlt.common.runtime.collector import LogCollector
 
@@ -78,3 +79,15 @@ def test_dlt_startup_failure_is_wrapped_with_catalog_context(tmp_path, monkeypat
     assert isinstance(raised.value.__cause__, RuntimeError)
     assert str(paths.catalog_path) in str(raised.value)
     assert "RuntimeError: dlt unavailable" in str(raised.value)
+
+
+def test_restores_relation_fetchone_that_dlt_still_calls() -> None:
+    ingestion_pipeline._restore_relation_fetchone()
+    ingestion_pipeline._restore_relation_fetchone()
+
+    connection = duckdb.connect()
+    try:
+        assert connection.sql("SELECT 42, 'x'").fetchone() == (42, "x")
+        assert connection.sql("SELECT 1 WHERE false").fetchone() is None
+    finally:
+        connection.close()
