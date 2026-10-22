@@ -124,6 +124,9 @@ PostgreSQL with `make docker-down`; this preserves the stopped containers and al
 The Docker defaults are sized for an 8 GB Docker Desktop VM: one concurrent dbt node, two DuckDB
 query threads, and a 6 GB DuckDB memory limit. Override `IMDB_DUCKLAKE_DBT_THREADS`,
 `IMDB_DUCKLAKE_QUERY_THREADS`, or `IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT` in `.env` on a larger host.
+dbt also runs with DuckDB's read-ahead off (`IMDB_DUCKLAKE_READ_AHEAD_DEPTH=0`): in DuckDB 2.0 it
+shares memory with joins, and at 4 GB / 10 threads it made `mart_person_filmography` spill and
+take 22 minutes instead of about one. Set `-1` for DuckDB's default.
 
 ## Logging and run correlation
 
