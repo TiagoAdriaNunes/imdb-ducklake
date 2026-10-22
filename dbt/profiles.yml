@@ -18,6 +18,9 @@ imdb_ducklake:
         threads: "{{ env_var('IMDB_DUCKLAKE_QUERY_THREADS', '2') | int }}"
         preserve_insertion_order: false
         memory_limit: "{{ env_var('IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT', '6GB') }}"
+        # DuckDB 2.0 read-ahead shares memory with joins: at 4GB/10 threads it made
+        # mart_person_filmography spill 11GB+ (1,325 s vs 61 s with 0 = off). Local files gain little.
+        read_ahead_depth: "{{ env_var('IMDB_DUCKLAKE_READ_AHEAD_DEPTH', '0') | int }}"
       extensions:
         - ducklake
         - postgres
