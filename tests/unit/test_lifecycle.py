@@ -429,19 +429,55 @@ def test_incomplete_build_cannot_be_promoted(tmp_path) -> None:
     assert not paths.current_dir.exists()
 
 
-def test_seed_raw_storage_also_copies_raw_from_unpromoted_builds(tmp_path) -> None:
-    root = tmp_path / "ducklake"
+def _seed_layout(root: Path) -> tuple[Path, BuildPaths]:
     current_raw = root / "current" / "storage" / "raw" / "title_basics"
     current_raw.mkdir(parents=True)
     (current_raw / "promoted.parquet").write_text("promoted", encoding="utf-8")
+    paths = BuildPaths.create(root, build_id="20260102T000000Z-newbuild0001")
+    initialize_build(paths)
+    return current_raw, paths
+
+
+def test_seed_raw_storage_also_seeds_raw_from_unpromoted_builds(tmp_path) -> None:
+    root = tmp_path / "ducklake"
+    current_raw, paths = _seed_layout(root)
+    (current_raw / "shared.parquet").write_text("from current", encoding="utf-8")
     interrupted = BuildPaths.create(root, build_id="20260101T000000Z-interrupted1")
     interrupted_raw = interrupted.storage_dir / "raw" / "title_basics"
     interrupted_raw.mkdir(parents=True)
     (interrupted_raw / "live.parquet").write_text("live", encoding="utf-8")
-    paths = BuildPaths.create(root, build_id="20260102T000000Z-newbuild0001")
-    initialize_build(paths)
+    (interrupted_raw / "shared.parquet").write_text("from interrupted", encoding="utf-8")
 
     seed_raw_storage(paths, root / "current" / "storage")
 
     seeded = paths.storage_dir / "raw" / "title_basics"
-    assert sorted(path.name for path in seeded.iterdir()) == ["live.parquet", "promoted.parquet"]
+    assert sorted(path.name for path in seeded.iterdir()) == [
+        "live.parquet",
+        "promoted.parquet",
+        "shared.parquet",
+    ]
+    assert (seeded / "shared.parquet").read_text(encoding="utf-8") == "from interrupted"
+
+
+def test_seed_raw_storage_hard_links_instead_of_copying(tmp_path) -> None:
+    current_raw, paths = _seed_layout(tmp_path / "ducklake")
+
+    seed_raw_storage(paths, current_raw.parent.parent)
+
+    seeded = paths.storage_dir / "raw" / "title_basics" / "promoted.parquet"
+    assert seeded.samefile(current_raw / "promoted.parquet")
+
+
+def test_seed_raw_storage_copies_when_hard_links_are_unsupported(tmp_path, monkeypatch) -> None:
+    current_raw, paths = _seed_layout(tmp_path / "ducklake")
+
+    def refuse_link(*_args: object, **_kwargs: object) -> None:
+        raise OSError("hard links unsupported")
+
+    monkeypatch.setattr(lifecycle.os, "link", refuse_link)
+
+    seed_raw_storage(paths, current_raw.parent.parent)
+
+    seeded = paths.storage_dir / "raw" / "title_basics" / "promoted.parquet"
+    assert seeded.read_text(encoding="utf-8") == "promoted"
+    assert not seeded.samefile(current_raw / "promoted.parquet")

@@ -383,7 +383,8 @@ def _check_space(
     # current/ only sizes the estimate; promotion renames it, so it needs no free space.
     current_bytes = _directory_size(settings.current_dir)
     estimated_temporary_bytes = max(raw_bytes * temporary_size_factor, current_bytes)
-    # PostgreSQL builds copy raw from current/ and unpromoted builds (seed_raw_storage).
+    # PostgreSQL builds seed raw from current/ and unpromoted builds (seed_raw_storage). Budgeted
+    # as a copy, in case the filesystem can't hard-link.
     seed_bytes = (
         sum(_directory_size(path) for path in _seed_sources(settings))
         if settings.catalog_url is not None

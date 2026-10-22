@@ -144,7 +144,7 @@ def initialize_build(paths: BuildPaths) -> None:
 
 
 def seed_raw_storage(build_paths: BuildPaths, current_storage_dir: Path) -> None:
-    """Copy ``raw/`` Parquet from the promoted and any unpromoted builds into a fresh build.
+    """Hard-link ``raw/`` Parquet from the promoted and any unpromoted builds into a fresh build.
 
     PostgreSQL-backed builds share one persistent metadata catalog across every build (ADR 0012);
     only the storage directory is isolated per build. dlt's own bookkeeping tables (``_dlt_loads``,
@@ -154,6 +154,8 @@ def seed_raw_storage(build_paths: BuildPaths, current_storage_dir: Path) -> None
     Copying ``raw/`` forward keeps those files reachable; ingestion's ``refresh="drop_data"``
     immediately orphans the copies once it replaces each table's data, and the existing
     ``ducklake_delete_orphaned_files`` checkpoint step reclaims that space after promotion.
+    Hard links take no time or space and are safe because DuckLake never rewrites a Parquet file;
+    filesystems without them fall back to copies.
     No-op when there is no promoted build yet (the first-ever build).
     """
     # Unpromoted builds too: an interrupted one may hold the catalog's live raw files.
@@ -165,11 +167,26 @@ def seed_raw_storage(build_paths: BuildPaths, current_storage_dir: Path) -> None
     sources = [path for path in (current_storage_dir / "raw", *staged) if path.is_dir()]
     try:
         for source in sources:
-            shutil.copytree(source, build_paths.storage_dir / "raw", dirs_exist_ok=True)
+            shutil.copytree(
+                source,
+                build_paths.storage_dir / "raw",
+                copy_function=_link_or_copy,
+                dirs_exist_ok=True,
+            )
     except OSError as error:
         raise LifecycleError(
             f"Could not seed raw storage for {build_paths.temporary_dir}"
         ) from error
+
+
+def _link_or_copy(source: str, destination: str) -> None:
+    # A later source replaces an earlier one, as a plain copy would.
+    with suppress(FileNotFoundError):
+        os.unlink(destination)
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
 
 
 def cleanup_build(paths: BuildPaths) -> None:
