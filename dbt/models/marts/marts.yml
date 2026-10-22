@@ -43,7 +43,7 @@ models:
       - {name: genres, data_type: "varchar[]", description: Genre array.}
       - {name: directors, data_type: "varchar[]", description: Director name array.}
       - {name: writers, data_type: "varchar[]", description: Writer name array.}
-      - {name: title_rank, data_type: bigint, description: Rank within title_type, 1 is best., data_tests: [not_null]}
+      - {name: title_rank, data_type: bigint, description: Rank within title_type, data_tests: [not_null], config: {meta: {1 is best.: null}}}
   - name: mart_top_movies
     description: >
       Display-ready top-500 movies, grain tconst. Pre-shaped from mart_top_titles
@@ -60,7 +60,7 @@ models:
       - {name: runtime_minutes, data_type: integer, description: "Runtime, in minutes."}
       - {name: average_rating, data_type: double, description: Average rating measure.}
       - {name: num_votes, data_type: bigint, description: Vote-count measure.}
-      - {name: title_rank, data_type: bigint, description: Rank by rating/votes, 1 is best., data_tests: [not_null]}
+      - {name: title_rank, data_type: bigint, description: Rank by rating/votes, data_tests: [not_null], config: {meta: {1 is best.: null}}}
       - {name: genres_text, data_type: varchar, description: Comma-joined genre list.}
       - {name: directors_text, data_type: varchar, description: Comma-joined director name list.}
       - {name: writers_text, data_type: varchar, description: Comma-joined writer name list.}
@@ -82,7 +82,7 @@ models:
       - {name: episode_count, data_type: bigint, description: Number of linked episodes.}
       - {name: average_rating, data_type: double, description: Average rating measure.}
       - {name: num_votes, data_type: bigint, description: Vote-count measure.}
-      - {name: title_rank, data_type: bigint, description: Rank by rating/votes, 1 is best., data_tests: [not_null]}
+      - {name: title_rank, data_type: bigint, description: Rank by rating/votes, data_tests: [not_null], config: {meta: {1 is best.: null}}}
       - {name: genres_text, data_type: varchar, description: Comma-joined genre list.}
       - {name: directors_text, data_type: varchar, description: Comma-joined director name list.}
       - {name: writers_text, data_type: varchar, description: Comma-joined writer name list.}

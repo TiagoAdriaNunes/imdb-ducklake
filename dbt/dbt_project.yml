@@ -7,7 +7,6 @@ profile: imdb_ducklake
 model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
-target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
 models:
@@ -24,3 +23,5 @@ models:
     marts:
       +schema: marts
       +materialized: table
+flags:
+  require_generic_test_arguments_property: true
