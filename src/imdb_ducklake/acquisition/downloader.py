@@ -379,10 +379,18 @@ def _verify_retained_artifact(
     size_bytes, sha256 = _hash_file(path, chunk_size)
     if size_bytes != entry.size_bytes or sha256 != entry.sha256:
         raise AcquisitionError(f"Checksum does not match manifest for {dataset.file_name}")
-    return _validate_archive(path, dataset)
+    # Byte-identical to the archive fully validated at download: re-check only the header and
+    # reuse its row count. Legacy entries without one still get the full pass.
+    return _validate_archive(path, dataset, known_row_count=entry.row_count)
 
 
-def _validate_archive(path: Path, dataset: DatasetSpec) -> int:
+def _validate_archive(
+    path: Path,
+    dataset: DatasetSpec,
+    *,
+    known_row_count: int | None = None,
+) -> int:
+    """Check the header, then the whole gzip stream and row count unless already known."""
     try:
         with gzip.open(path, "rb") as source:
             header_bytes = source.readline()
@@ -392,6 +400,8 @@ def _validate_archive(path: Path, dataset: DatasetSpec) -> int:
                     f"Header mismatch for {dataset.file_name}: "
                     f"expected {dataset.headers!r}, received {actual_header!r}"
                 )
+            if known_row_count is not None:
+                return known_row_count
             row_count = 0
             has_data = False
             last_byte = b""
