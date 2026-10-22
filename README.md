@@ -124,6 +124,9 @@ PostgreSQL with `make docker-down`; this preserves the stopped containers and al
 The Docker defaults are sized for an 8 GB Docker Desktop VM: one concurrent dbt node, two DuckDB
 query threads, and a 6 GB DuckDB memory limit. Override `IMDB_DUCKLAKE_DBT_THREADS`,
 `IMDB_DUCKLAKE_QUERY_THREADS`, or `IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT` in `.env` on a larger host.
+dbt also runs with DuckDB's read-ahead off (`IMDB_DUCKLAKE_READ_AHEAD_DEPTH=0`): in DuckDB 2.0 it
+shares memory with joins, and at 4 GB / 10 threads it made `mart_person_filmography` spill and
+take 22 minutes instead of about one. Set `-1` for DuckDB's default.
 
 ## Logging and run correlation
 
@@ -206,10 +209,10 @@ make build
 
 The command acquires the single-writer lock, reuses or downloads all seven verified archives,
 checks free space, creates an isolated build, runs dlt ingestion and `dbt build`, and validates all
-31 required relations through a new process with a read-only DuckLake attachment. Only then does
+34 required relations through a new process with a read-only DuckLake attachment. Only then does
 it atomically replace `data/ducklake/current/`; any earlier failure leaves the existing current
-build unchanged. The previous current build is retained for rollback, and older retired or
-crash-orphaned workspaces are pruned on the next run.
+build unchanged. Only the latest DuckLake snapshot is kept. Locally, the previous build is
+retained for rollback; with PostgreSQL, old builds are removed after each successful build.
 
 `build` is intentionally all-or-nothing: any failure anywhere in the pipeline, including a late
 `dbt build` test, discards the whole isolated workspace it created — even the already-ingested raw

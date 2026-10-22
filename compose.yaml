@@ -39,6 +39,10 @@ services:
       # Docker Desktop currently exposes about 8GB. Leave headroom for Python, dbt, dlt, and WSL;
       # exceeding the cgroup limit makes Linux SIGKILL dbt with exit code -9.
       IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT: ${IMDB_DUCKLAKE_DUCKDB_MEMORY_LIMIT:-6GB}
+      IMDB_DUCKLAKE_READ_AHEAD_DEPTH: ${IMDB_DUCKLAKE_READ_AHEAD_DEPTH:-0}
+      # Per-build scratch (DuckDB spill, dlt load packages), emptied before and after each build.
+      # On the host disk, not a Docker volume: Docker's disk file never shrinks after deletes.
+      IMDB_DUCKLAKE_SCRATCH_DIR: /data/.scratch
     volumes:
       - ./data:/data
 

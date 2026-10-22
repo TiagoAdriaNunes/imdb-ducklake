@@ -44,11 +44,9 @@ def _year_cell(start: object) -> str:
     return str(int(start))
 
 
-def _cast_button(tconst: object, input_id: str) -> str:
-    javascript = (
-        f"Shiny.setInputValue({json.dumps(input_id)}, {json.dumps(str(tconst))}, "
-        "{priority: 'event'})"
-    )
+def _cast_button(tconst: object, title: object, input_id: str) -> str:
+    value = json.dumps({"tconst": str(tconst), "title": str(title)})
+    javascript = f"Shiny.setInputValue({json.dumps(input_id)}, {value}, {{priority: 'event'}})"
     return (
         '<button type="button" class="btn btn-sm btn-outline-dark cast-button" '
         f'onclick="{html.escape(javascript, quote=True)}">Display cast</button>'
@@ -93,19 +91,19 @@ def titles_server(
     def show_cast():
         if startup_error is not None or connection is None:
             return
-        tconst = input.cast_title()
-        frame = get_title_cast(connection, tconst).df()
+        selected = input.cast_title()
+        title = selected["title"]
+        frame = get_title_cast(connection, selected["tconst"]).df()
         if frame.empty:
             ui.modal_show(
                 ui.modal(
-                    ui.p(f"No principal cast is available for {tconst}."),
+                    ui.p(f"No principal cast is available for {title}."),
                     title="Cast",
                     easy_close=True,
                 )
             )
             return
 
-        title = str(frame.pop("Title").iloc[0])
         frame["Characters"] = frame["Characters"].fillna("")
         frame["Role"] = frame["Role"].map(lambda value: str(value).capitalize())
         ui.modal_show(
@@ -151,9 +149,10 @@ def titles_server(
             year_columns = ["Year"]
         runtime_column = "Episode runtime (min)" if show_end_year else "Runtime (min)"
         frame = frame.rename(columns={"Runtime (min)": runtime_column})
-        frame["Cast"] = frame["IMDb ID"].map(
-            lambda tconst: _cast_button(tconst, session.ns("cast_title"))
-        )
+        frame["Cast"] = [
+            _cast_button(tconst, title, session.ns("cast_title"))
+            for tconst, title in zip(frame["IMDb ID"], frame["Primary Title"], strict=True)
+        ]
         columns_to_drop = ["Primary Title", "Original Title", "Type"]
         if not show_end_year:
             columns_to_drop.extend(["Start Year", "End Year"])

@@ -34,8 +34,8 @@ endif
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
 	shell-ui clean-dlt-pipelines upload-dataset docker-image docker-up docker-build docker-down \
-	docker-status docker-download docker-ingest docker-transform docker-validate docker-checkpoint \
-	docker-app docker-app-logs docker-image-ready docker-docs docker-publish-docs
+	docker-status docker-download docker-ingest docker-transform docker-validate docker-promote \
+	docker-checkpoint docker-app docker-app-logs docker-image-ready docker-docs docker-publish-docs
 
 help:
 	@echo "Setup"
@@ -47,6 +47,7 @@ help:
 	@echo "  make docker-ingest   ingest raw data into the PostgreSQL-backed DuckLake catalog"
 	@echo "  make docker-transform run dbt against the PostgreSQL-backed DuckLake catalog"
 	@echo "  make docker-validate validate the PostgreSQL-backed DuckLake catalog"
+	@echo "  make docker-promote  validate and promote a staged PostgreSQL-backed build"
 	@echo "  make docker-checkpoint checkpoint the PostgreSQL-backed DuckLake catalog"
 	@echo "  make docker-app      ensure PostgreSQL + Shiny are running; no pipeline run"
 	@echo "  make docker-app-logs follow Shiny app logs"
@@ -116,6 +117,9 @@ docker-transform: docker-image-ready
 
 docker-validate: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse validate $(ARGS)
+
+docker-promote: docker-image-ready
+	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse promote $(ARGS)
 
 docker-checkpoint: docker-image-ready
 	docker compose run --rm $(DOCKER_PIPELINE_ARGS) lakehouse checkpoint $(ARGS)

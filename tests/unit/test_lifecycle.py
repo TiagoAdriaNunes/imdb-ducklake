@@ -20,6 +20,7 @@ from imdb_ducklake.lakehouse.lifecycle import (
     promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
+    seed_raw_storage,
     select_staged_build,
     temporary_build,
 )
@@ -111,7 +112,7 @@ def test_temporary_build_cleans_failure_without_touching_current(tmp_path) -> No
 
 
 def test_space_budget_and_available_space_check(tmp_path, monkeypatch) -> None:
-    budget = SpaceBudget(10, 20, 30, 40)
+    budget = SpaceBudget(10, 50, 40)
     usage = SimpleNamespace(total=1_000, used=900, free=100)
     monkeypatch.setattr(lifecycle.shutil, "disk_usage", lambda _path: usage)
 
@@ -120,7 +121,7 @@ def test_space_budget_and_available_space_check(tmp_path, monkeypatch) -> None:
 
 
 def test_insufficient_or_unreadable_space_is_reported(tmp_path, monkeypatch) -> None:
-    budget = SpaceBudget(10, 20, 30, 41)
+    budget = SpaceBudget(10, 50, 41)
     usage = SimpleNamespace(total=1_000, used=900, free=100)
     monkeypatch.setattr(lifecycle.shutil, "disk_usage", lambda _path: usage)
     with pytest.raises(LifecycleError, match="Insufficient free space"):
@@ -136,7 +137,7 @@ def test_insufficient_or_unreadable_space_is_reported(tmp_path, monkeypatch) -> 
 
 def test_space_budget_rejects_negative_values() -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        SpaceBudget(0, 0, -1)
+        SpaceBudget(0, -1)
 
 
 def test_build_lock_records_owner_and_blocks_contention(tmp_path) -> None:
@@ -313,6 +314,20 @@ def test_prunes_orphaned_builds_and_keeps_newest_retired(tmp_path) -> None:
     assert new_retired.is_dir()
 
 
+def test_clear_scratch_empties_directories_and_skips_missing_ones(tmp_path) -> None:
+    dbt_state = tmp_path / ".dbt"
+    spill = dbt_state / "killed.duckdb.tmp"
+    spill.mkdir(parents=True)
+    (spill / "duckdb_temp_storage-0.tmp").write_bytes(b"spill")
+    (dbt_state / "killed.duckdb").write_bytes(b"controller")
+
+    removed = lifecycle.clear_scratch(dbt_state, tmp_path / "missing")
+
+    assert set(removed) == {spill, dbt_state / "killed.duckdb"}
+    assert dbt_state.is_dir()
+    assert not list(dbt_state.iterdir())
+
+
 def test_selects_one_complete_staged_build_or_requires_an_id(tmp_path) -> None:
     root = tmp_path / "ducklake"
     with pytest.raises(LifecycleError, match="No staged"):
@@ -361,6 +376,10 @@ def test_checkpoint_lakehouse_compacts_a_real_ducklake_catalog(tmp_path) -> None
         )
         connection.execute("CREATE TABLE imdb_lake.demo AS SELECT 1 AS value")
         connection.execute("INSERT INTO imdb_lake.demo VALUES (2)")
+        # Rebuild: the old file is only in older snapshots.
+        connection.execute("CREATE TABLE imdb_lake.rebuilt AS SELECT 'old' AS value")
+        connection.execute("DROP TABLE imdb_lake.rebuilt")
+        connection.execute("CREATE TABLE imdb_lake.rebuilt AS SELECT 'new' AS value")
     finally:
         connection.close()
 
@@ -374,9 +393,23 @@ def test_checkpoint_lakehouse_compacts_a_real_ducklake_catalog(tmp_path) -> None
             f"(DATA_PATH '{storage_dir.as_posix()}', READ_ONLY)"
         )
         rows = verify.execute("SELECT value FROM imdb_lake.demo ORDER BY value").fetchall()
+        rebuilt = verify.execute("SELECT value FROM imdb_lake.rebuilt").fetchall()
+        snapshots = verify.execute("SELECT count(*) FROM ducklake_snapshots('imdb_lake')")
+        snapshot_count = snapshots.fetchone()[0]
+        referenced_files = {
+            Path(row[0]).name
+            for row in verify.execute(
+                "SELECT data_file FROM ducklake_list_files('imdb_lake', 'demo') "
+                "UNION ALL SELECT data_file FROM ducklake_list_files('imdb_lake', 'rebuilt')"
+            ).fetchall()
+        }
     finally:
         verify.close()
     assert rows == [(1,), (2,)]
+    assert rebuilt == [("new",)]
+    assert snapshot_count == 1
+    on_disk = {path.name for path in storage_dir.rglob("*.parquet")}
+    assert on_disk == referenced_files
 
 
 def test_checkpoint_lakehouse_wraps_failures_as_lifecycle_errors(tmp_path) -> None:
@@ -394,3 +427,57 @@ def test_incomplete_build_cannot_be_promoted(tmp_path) -> None:
 
     assert paths.temporary_dir.exists()
     assert not paths.current_dir.exists()
+
+
+def _seed_layout(root: Path) -> tuple[Path, BuildPaths]:
+    current_raw = root / "current" / "storage" / "raw" / "title_basics"
+    current_raw.mkdir(parents=True)
+    (current_raw / "promoted.parquet").write_text("promoted", encoding="utf-8")
+    paths = BuildPaths.create(root, build_id="20260102T000000Z-newbuild0001")
+    initialize_build(paths)
+    return current_raw, paths
+
+
+def test_seed_raw_storage_also_seeds_raw_from_unpromoted_builds(tmp_path) -> None:
+    root = tmp_path / "ducklake"
+    current_raw, paths = _seed_layout(root)
+    (current_raw / "shared.parquet").write_text("from current", encoding="utf-8")
+    interrupted = BuildPaths.create(root, build_id="20260101T000000Z-interrupted1")
+    interrupted_raw = interrupted.storage_dir / "raw" / "title_basics"
+    interrupted_raw.mkdir(parents=True)
+    (interrupted_raw / "live.parquet").write_text("live", encoding="utf-8")
+    (interrupted_raw / "shared.parquet").write_text("from interrupted", encoding="utf-8")
+
+    seed_raw_storage(paths, root / "current" / "storage")
+
+    seeded = paths.storage_dir / "raw" / "title_basics"
+    assert sorted(path.name for path in seeded.iterdir()) == [
+        "live.parquet",
+        "promoted.parquet",
+        "shared.parquet",
+    ]
+    assert (seeded / "shared.parquet").read_text(encoding="utf-8") == "from interrupted"
+
+
+def test_seed_raw_storage_hard_links_instead_of_copying(tmp_path) -> None:
+    current_raw, paths = _seed_layout(tmp_path / "ducklake")
+
+    seed_raw_storage(paths, current_raw.parent.parent)
+
+    seeded = paths.storage_dir / "raw" / "title_basics" / "promoted.parquet"
+    assert seeded.samefile(current_raw / "promoted.parquet")
+
+
+def test_seed_raw_storage_copies_when_hard_links_are_unsupported(tmp_path, monkeypatch) -> None:
+    current_raw, paths = _seed_layout(tmp_path / "ducklake")
+
+    def refuse_link(*_args: object, **_kwargs: object) -> None:
+        raise OSError("hard links unsupported")
+
+    monkeypatch.setattr(lifecycle.os, "link", refuse_link)
+
+    seed_raw_storage(paths, current_raw.parent.parent)
+
+    seeded = paths.storage_dir / "raw" / "title_basics" / "promoted.parquet"
+    assert seeded.read_text(encoding="utf-8") == "promoted"
+    assert not seeded.samefile(current_raw / "promoted.parquet")

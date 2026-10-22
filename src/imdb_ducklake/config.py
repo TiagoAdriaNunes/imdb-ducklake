@@ -52,6 +52,10 @@ class Settings:
     storage_url: str | None = None
     ingest_workers: int = 2
     ingest_chunk_size: int = 50_000
+    # Per-build scratch space: dbt's controller DuckDB file (DuckDB spills large sorts/joins into a
+    # `.tmp` dir next to it) and dlt's load packages. Defaults to data_dir. `build` empties it
+    # before and after each run.
+    scratch_dir: Path | None = None
 
     @classmethod
     def load(
@@ -69,6 +73,10 @@ class Settings:
         ingest_chunk_size: int | None = None,
     ) -> "Settings":
         root = find_repository_root(repository_root)
+        raw_scratch = _env_or_none("IMDB_DUCKLAKE_SCRATCH_DIR")
+        configured_scratch = Path(raw_scratch) if raw_scratch else None
+        if configured_scratch is not None and not configured_scratch.is_absolute():
+            configured_scratch = root / configured_scratch
         configured_data = data_dir or Path(environ.get("IMDB_LAKEHOUSE_DATA_DIR", "data"))
         resolved_data = configured_data if configured_data.is_absolute() else root / configured_data
         configured_level = (log_level or environ.get("IMDB_LAKEHOUSE_LOG_LEVEL", "INFO")).upper()
@@ -164,6 +172,7 @@ class Settings:
             storage_url=resolved_storage_url,
             ingest_workers=configured_workers,
             ingest_chunk_size=configured_chunk_size,
+            scratch_dir=configured_scratch,
         )
 
     @property
@@ -184,7 +193,7 @@ class Settings:
 
     @property
     def dlt_pipelines_dir(self) -> Path:
-        return self.data_dir / ".dlt" / "pipelines"
+        return (self.scratch_dir or self.data_dir) / ".dlt" / "pipelines"
 
     @property
     def dbt_project_dir(self) -> Path:
@@ -192,4 +201,4 @@ class Settings:
 
     @property
     def dbt_state_dir(self) -> Path:
-        return self.data_dir / ".dbt"
+        return (self.scratch_dir or self.data_dir) / ".dbt"

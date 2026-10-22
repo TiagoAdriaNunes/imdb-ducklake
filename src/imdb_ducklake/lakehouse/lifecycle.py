@@ -77,12 +77,13 @@ class BuildPaths:
 
 @dataclass(frozen=True, slots=True)
 class SpaceBudget:
-    """Conservative free-space requirement for one build attempt."""
+    """Free space one build attempt needs for new writes."""
 
-    raw_archives_bytes: int
-    current_build_bytes: int
+    download_bytes: int
     temporary_build_bytes: int
     reserve_bytes: int = 0
+    seed_bytes: int = 0
+    spill_bytes: int = 0
 
     def __post_init__(self) -> None:
         values = asdict(self)
@@ -92,9 +93,10 @@ class SpaceBudget:
     @property
     def required_bytes(self) -> int:
         return (
-            self.raw_archives_bytes
-            + self.current_build_bytes
+            self.download_bytes
+            + self.seed_bytes
             + self.temporary_build_bytes
+            + self.spill_bytes
             + self.reserve_bytes
         )
 
@@ -108,7 +110,10 @@ def ensure_free_space(path: Path, budget: SpaceBudget) -> int:
         raise LifecycleError(f"Could not inspect free space for {probe}") from error
     if free_bytes < budget.required_bytes:
         raise LifecycleError(
-            f"Insufficient free space at {probe}: required {budget.required_bytes:,} bytes, "
+            f"Insufficient free space at {probe}: required {budget.required_bytes:,} bytes "
+            f"(downloads {budget.download_bytes:,} + seeded raw {budget.seed_bytes:,} + new build "
+            f"{budget.temporary_build_bytes:,} + spill {budget.spill_bytes:,} + reserve "
+            f"{budget.reserve_bytes:,}), "
             f"available {free_bytes:,} bytes"
         )
     return free_bytes
@@ -136,6 +141,52 @@ def initialize_build(paths: BuildPaths) -> None:
     except OSError as error:
         shutil.rmtree(paths.temporary_dir, ignore_errors=True)
         raise LifecycleError(f"Could not initialize build storage {paths.storage_dir}") from error
+
+
+def seed_raw_storage(build_paths: BuildPaths, current_storage_dir: Path) -> None:
+    """Hard-link ``raw/`` Parquet from the promoted and any unpromoted builds into a fresh build.
+
+    PostgreSQL-backed builds share one persistent metadata catalog across every build (ADR 0012);
+    only the storage directory is isolated per build. dlt's own bookkeeping tables (``_dlt_loads``,
+    ``_dlt_version``, ``_dlt_pipeline_state``) are never dropped between runs - the catalog already
+    has committed history for them once any build has been promoted - so a fresh, empty isolated
+    storage directory leaves their physical Parquet files unreachable and dlt's sync step fails.
+    Copying ``raw/`` forward keeps those files reachable; ingestion's ``refresh="drop_data"``
+    immediately orphans the copies once it replaces each table's data, and the existing
+    ``ducklake_delete_orphaned_files`` checkpoint step reclaims that space after promotion.
+    Hard links take no time or space and are safe because DuckLake never rewrites a Parquet file;
+    filesystems without them fall back to copies.
+    No-op when there is no promoted build yet (the first-ever build).
+    """
+    # Unpromoted builds too: an interrupted one may hold the catalog's live raw files.
+    staged = [
+        path / "storage" / "raw"
+        for path in sorted(_safe_child_directories(build_paths.temporary_dir.parent))
+        if path != build_paths.temporary_dir
+    ]
+    sources = [path for path in (current_storage_dir / "raw", *staged) if path.is_dir()]
+    try:
+        for source in sources:
+            shutil.copytree(
+                source,
+                build_paths.storage_dir / "raw",
+                copy_function=_link_or_copy,
+                dirs_exist_ok=True,
+            )
+    except OSError as error:
+        raise LifecycleError(
+            f"Could not seed raw storage for {build_paths.temporary_dir}"
+        ) from error
+
+
+def _link_or_copy(source: str, destination: str) -> None:
+    # A later source replaces an earlier one, as a plain copy would.
+    with suppress(FileNotFoundError):
+        os.unlink(destination)
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
 
 
 def cleanup_build(paths: BuildPaths) -> None:
@@ -236,7 +287,7 @@ def promote_build(
 
 
 def checkpoint_lakehouse(catalog_path: Path, storage_dir: Path) -> tuple[str, ...]:
-    """Run DuckLake's CHECKPOINT, then delete any uncommitted crash-orphaned data files."""
+    """Run DuckLake's CHECKPOINT, keep only the latest snapshot, and delete unreferenced files."""
     return _checkpoint_catalog(
         metadata_path=catalog_path.resolve().as_posix(),
         storage_dir=storage_dir,
@@ -281,10 +332,15 @@ def _checkpoint_catalog(
         )
         connection.execute("USE imdb_lake")
         connection.execute("CHECKPOINT")
-        removed = connection.execute(
+        # Keep only the latest snapshot (after CHECKPOINT, which commits one of its own).
+        connection.execute("CALL ducklake_expire_snapshots('imdb_lake', older_than => now())")
+        old_files = connection.execute(
+            "CALL ducklake_cleanup_old_files('imdb_lake', cleanup_all => true)"
+        ).fetchall()
+        orphaned_files = connection.execute(
             "CALL ducklake_delete_orphaned_files('imdb_lake', dry_run => false)"
         ).fetchall()
-        return tuple(row[0] for row in removed)
+        return tuple(row[0] for row in (*old_files, *orphaned_files))
     except Exception as error:
         raise LifecycleError(
             f"Could not checkpoint the DuckLake catalog: {type(error).__name__}: {error}"
@@ -365,8 +421,40 @@ def prune_obsolete_builds(
     return tuple(removed)
 
 
-def select_staged_build(lakehouse_dir: Path, *, build_id: str | None = None) -> BuildPaths:
-    """Select one complete unpromoted build, requiring an ID when selection is ambiguous."""
+def clear_scratch(*directories: Path) -> tuple[Path, ...]:
+    """Empty build scratch directories (dbt spill, dlt load packages).
+
+    Callers must hold the lakehouse build lock.
+    """
+    removed: list[Path] = []
+    for directory in directories:
+        if not directory.exists():
+            continue
+        try:
+            for path in directory.iterdir():
+                if path.is_symlink():
+                    raise LifecycleError(f"Refusing to clear symbolic link {path}")
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                removed.append(path)
+        except OSError as error:
+            raise LifecycleError(f"Could not clear scratch directory {directory}") from error
+    return tuple(removed)
+
+
+def select_staged_build(
+    lakehouse_dir: Path,
+    *,
+    build_id: str | None = None,
+    require_catalog_file: bool = True,
+) -> BuildPaths:
+    """Select one complete unpromoted build, requiring an ID when selection is ambiguous.
+
+    ``require_catalog_file=False`` selects a PostgreSQL-backed staged build, which has no local
+    ``catalog.duckdb`` (metadata lives in PostgreSQL) - matches ``promote_build``'s own flag.
+    """
     root = lakehouse_dir.resolve()
     if build_id is not None:
         candidates = (BuildPaths.create(root, build_id=build_id),)
@@ -384,7 +472,7 @@ def select_staged_build(lakehouse_dir: Path, *, build_id: str | None = None) -> 
         candidates = (BuildPaths.create(root, build_id=directories[0].name),)
     selected = candidates[0]
     try:
-        _validate_promotable_layout(selected)
+        _validate_promotable_layout(selected, require_catalog_file=require_catalog_file)
     except PromotionError as error:
         raise LifecycleError(f"Staged build is incomplete: {selected.temporary_dir}") from error
     return selected

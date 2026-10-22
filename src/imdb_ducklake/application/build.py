@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,11 +30,13 @@ from imdb_ducklake.lakehouse.lifecycle import (
     checkpoint_catalog_target,
     checkpoint_lakehouse,
     cleanup_build,
+    clear_scratch,
     ensure_free_space,
     initialize_build,
     promote_build,
     prune_obsolete_builds,
     recover_interrupted_promotion,
+    seed_raw_storage,
 )
 from imdb_ducklake.lakehouse.validation import ValidationResult, validate_build
 from imdb_ducklake.transformation.dbt_runner import DbtRunResult, run_dbt
@@ -92,7 +95,7 @@ def build_lakehouse(
         status="waiting",
         path=str(lock_path),
     )
-    with BuildLock(lock_path):
+    with BuildLock(lock_path), _scratch_cleared(settings, build_logger):
         build_logger.info(
             "Build lock acquired",
             event_code="build_lock_acquired",
@@ -100,9 +103,12 @@ def build_lakehouse(
             status="completed",
         )
         recover_interrupted_promotion(settings.lakehouse_dir)
+        existing_raw_bytes = _directory_size(settings.raw_dir)
+        # Archives may be re-downloaded next to the old ones.
         _check_space(
             settings,
-            raw_bytes=_directory_size(settings.raw_dir),
+            download_bytes=existing_raw_bytes,
+            raw_bytes=existing_raw_bytes,
             reserve_bytes=reserve_bytes,
             temporary_size_factor=temporary_size_factor,
             log=build_logger,
@@ -133,22 +139,34 @@ def build_lakehouse(
 
         _check_space(
             settings,
+            download_bytes=0,
             raw_bytes=raw_bytes,
             reserve_bytes=reserve_bytes,
             temporary_size_factor=temporary_size_factor,
             log=build_logger,
         )
-        removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
-        if removed:
-            build_logger.info(
-                "Obsolete builds pruned",
-                event_code="obsolete_builds_pruned",
-                stage="lifecycle",
-                status="completed",
-                count=len(removed),
-            )
+        # Not in PostgreSQL mode: an unpromoted build may hold the catalog's live files (ADR
+        # 0012). Those builds are pruned after promotion instead.
+        if catalog_target is None:
+            removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=1)
+            if removed:
+                build_logger.info(
+                    "Obsolete builds pruned",
+                    event_code="obsolete_builds_pruned",
+                    stage="lifecycle",
+                    status="completed",
+                    count=len(removed),
+                )
 
         initialize_build(paths)
+        if catalog_target is not None:
+            seed_raw_storage(paths, settings.current_dir / "storage")
+            build_logger.info(
+                "Raw storage seeded from promoted build",
+                event_code="raw_storage_seeded",
+                stage="ingestion",
+                status="completed",
+            )
         build_logger.info(
             "Ingestion started",
             event_code="ingestion_started",
@@ -281,6 +299,9 @@ def build_lakehouse(
             )
             raise
 
+        if catalog_target is not None:
+            _prune_after_shared_catalog_build(settings, build_logger)
+
     build_logger.info(
         "Lakehouse build completed",
         event_code="lakehouse_build_completed",
@@ -292,21 +313,91 @@ def build_lakehouse(
     return BuildResult(artifacts, ingestion, transformation, validation, promoted)
 
 
+@contextmanager
+def _scratch_cleared(settings: Settings, log: Logger) -> Iterator[None]:
+    """Clear scratch before the build (a killed build's leftovers) and after it, even on failure."""
+    _clear_scratch(settings, log)
+    try:
+        yield
+    finally:
+        _clear_scratch(settings, log)
+
+
+def _clear_scratch(settings: Settings, log: Logger) -> None:
+    directories = (settings.dbt_state_dir, settings.dlt_pipelines_dir)
+    try:
+        freed_bytes = sum(_directory_size(directory) for directory in directories)
+        removed = clear_scratch(*directories)
+    except LifecycleError as error:
+        log.warning(
+            "Scratch could not be cleared",
+            event_code="scratch_clear_failed",
+            stage="lifecycle",
+            status="failed",
+            error=str(error),
+        )
+        return
+    if removed:
+        log.info(
+            "Scratch cleared",
+            event_code="scratch_cleared",
+            stage="lifecycle",
+            status="completed",
+            count=len(removed),
+            bytes=freed_bytes,
+        )
+
+
+def _prune_after_shared_catalog_build(settings: Settings, log: Logger) -> None:
+    """Remove retired and unpromoted builds; safe once the checkpoint expired old snapshots."""
+    try:
+        removed = prune_obsolete_builds(settings.lakehouse_dir, keep_retired=0)
+    except LifecycleError as error:
+        log.warning(
+            "Obsolete builds could not be pruned",
+            event_code="obsolete_builds_prune_failed",
+            stage="lifecycle",
+            status="failed",
+            error=str(error),
+        )
+        return
+    if removed:
+        log.info(
+            "Obsolete builds pruned",
+            event_code="obsolete_builds_pruned",
+            stage="lifecycle",
+            status="completed",
+            count=len(removed),
+        )
+
+
 def _check_space(
     settings: Settings,
     *,
+    download_bytes: int,
     raw_bytes: int,
     reserve_bytes: int,
     temporary_size_factor: int,
     log: Logger,
 ) -> None:
+    # current/ only sizes the estimate; promotion renames it, so it needs no free space.
     current_bytes = _directory_size(settings.current_dir)
     estimated_temporary_bytes = max(raw_bytes * temporary_size_factor, current_bytes)
+    # PostgreSQL builds seed raw from current/ and unpromoted builds (seed_raw_storage). Budgeted
+    # as a copy, in case the filesystem can't hard-link.
+    seed_bytes = (
+        sum(_directory_size(path) for path in _seed_sources(settings))
+        if settings.catalog_url is not None
+        else 0
+    )
+    # Docker puts DuckDB spill in scratch_dir (data/.scratch), on data_dir's disk.
+    spill_bytes = current_bytes if settings.scratch_dir is not None else 0
     budget = SpaceBudget(
-        raw_archives_bytes=raw_bytes,
-        current_build_bytes=current_bytes,
+        download_bytes=download_bytes,
         temporary_build_bytes=estimated_temporary_bytes,
         reserve_bytes=reserve_bytes,
+        seed_bytes=seed_bytes,
+        spill_bytes=spill_bytes,
     )
     free_bytes = ensure_free_space(settings.data_dir, budget)
     log.info(
@@ -315,8 +406,22 @@ def _check_space(
         stage="lifecycle",
         status="completed",
         required_bytes=budget.required_bytes,
+        download_bytes=budget.download_bytes,
+        seed_bytes=budget.seed_bytes,
+        temporary_build_bytes=budget.temporary_build_bytes,
+        spill_bytes=budget.spill_bytes,
+        reserve_bytes=budget.reserve_bytes,
         available_bytes=free_bytes,
     )
+
+
+def _seed_sources(settings: Settings) -> list[Path]:
+    builds = settings.lakehouse_dir / "builds"
+    staged = sorted(builds.iterdir()) if builds.is_dir() else []
+    return [
+        settings.current_dir / "storage" / "raw",
+        *(path / "storage" / "raw" for path in staged),
+    ]
 
 
 def _directory_size(path: Path) -> int:

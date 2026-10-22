@@ -289,11 +289,13 @@ def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, mon
     def fake_validate_build(received, **kwargs):
         assert received == paths
         assert kwargs["working_directory"] == settings.repository_root
+        assert kwargs["catalog_target"] is None
         events.append("validate staged")
         return SimpleNamespace(relation_count=31)
 
-    def fake_promote(received):
+    def fake_promote(received, *, require_catalog_file=True):
         assert received == paths
+        assert require_catalog_file is True
         events.append("promote")
         return SimpleNamespace(
             build_id=paths.build_id,
@@ -337,6 +339,75 @@ def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, mon
     assert "reattaching 31 current relations read-only" in result.stdout
     assert "marts.mart_title_search: 2 rows" in result.stdout
     assert "Pruned 1 obsolete build workspace(s)" in result.stdout
+
+
+def test_promote_command_validates_promotes_and_reattaches_current_postgresql(
+    tmp_path, monkeypatch
+) -> None:
+    """A PostgreSQL-backed staged build has no local catalog.duckdb (ADR 0012's documented known
+    gap for this command: it used to assume every staged build has one). Promote must validate,
+    promote, and checkpoint through CatalogTarget for Postgres mode too, exactly like
+    build_lakehouse's internal promotion already does."""
+    settings = Settings(
+        repository_root=tmp_path,
+        data_dir=tmp_path / "data",
+        catalog_url="postgresql://imdb:secret@postgres:5432/ducklake_catalog",
+    )
+    paths = BuildPaths.create(settings.lakehouse_dir, build_id="fixture-build")
+    initialize_build(paths)
+    monkeypatch.setattr(cli.Settings, "load", staticmethod(lambda **_kwargs: settings))
+    events: list[str] = []
+
+    def fake_validate_build(received, *, catalog_target, **kwargs):
+        assert kwargs["working_directory"] == settings.repository_root
+        assert catalog_target.url == settings.catalog_url
+        if catalog_target.storage_dir == paths.storage_dir:
+            events.append("validate staged")
+        else:
+            assert catalog_target.storage_dir == settings.current_dir / "storage"
+            events.append("validate current")
+        return SimpleNamespace(relation_count=31, mart_row_counts={"mart_title_search": 2})
+
+    def fake_promote(received, *, require_catalog_file=True):
+        assert received == paths
+        assert require_catalog_file is False
+        events.append("promote")
+        return SimpleNamespace(
+            build_id=paths.build_id,
+            current_dir=settings.current_dir,
+            catalog_path=settings.current_dir / "catalog.duckdb",
+            storage_dir=settings.current_dir / "storage",
+        )
+
+    def fake_checkpoint_catalog_target(target):
+        assert target.url == settings.catalog_url
+        assert target.storage_dir == settings.current_dir / "storage"
+        events.append("checkpoint")
+        return ()
+
+    def fail_local_checkpoint(*_args, **_kwargs):
+        pytest.fail("local checkpoint must not run in PostgreSQL mode")
+
+    monkeypatch.setattr(cli, "validate_build", fake_validate_build)
+    monkeypatch.setattr(cli, "promote_build", fake_promote)
+
+    def fake_prune(received, *, keep_retired):
+        assert received == settings.lakehouse_dir
+        assert keep_retired == 0
+        events.append("prune")
+        return ()
+
+    monkeypatch.setattr(cli, "checkpoint_catalog_target", fake_checkpoint_catalog_target)
+    monkeypatch.setattr(cli, "checkpoint_lakehouse", fail_local_checkpoint)
+    monkeypatch.setattr(cli, "prune_obsolete_builds", fake_prune)
+
+    result = runner.invoke(cli.app, ["promote", "--build-id", paths.build_id, "--prune"])
+
+    assert result.exit_code == 0
+    assert events == ["validate staged", "promote", "checkpoint", "validate current", "prune"]
+    assert "retained no rollback build" in result.stdout
+    assert "Promoted build fixture-build" in result.stdout
+    assert "marts.mart_title_search: 2 rows" in result.stdout
 
 
 def test_validate_command_automatically_selects_the_only_staged_build(

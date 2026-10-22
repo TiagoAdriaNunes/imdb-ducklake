@@ -43,7 +43,49 @@ models:
       - {name: genres, data_type: "varchar[]", description: Genre array.}
       - {name: directors, data_type: "varchar[]", description: Director name array.}
       - {name: writers, data_type: "varchar[]", description: Writer name array.}
-      - {name: title_rank, data_type: bigint, description: Rank within title_type, 1 is best., data_tests: [not_null]}
+      - {name: title_rank, data_type: bigint, description: Rank within title_type, data_tests: [not_null], config: {meta: {1 is best.: null}}}
+  - name: mart_top_movies
+    description: >
+      Display-ready top-500 movies, grain tconst. Pre-shaped from mart_top_titles
+      (genres/directors/writers flattened to comma-joined text) so the Shiny app's default movie
+      listing does nothing but an already-bounded scan - no per-query shaping work, which
+      matters most when storage is remote (see ADR 0013).
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: tconst, data_type: varchar, description: Title key., data_tests: [not_null, unique]}
+      - {name: primary_title, data_type: varchar, description: Searchable title text.}
+      - {name: original_title, data_type: varchar, description: Original title text.}
+      - {name: start_year, data_type: smallint, description: Release start year.}
+      - {name: runtime_minutes, data_type: integer, description: "Runtime, in minutes."}
+      - {name: average_rating, data_type: double, description: Average rating measure.}
+      - {name: num_votes, data_type: bigint, description: Vote-count measure.}
+      - {name: title_rank, data_type: bigint, description: Rank by rating/votes, data_tests: [not_null], config: {meta: {1 is best.: null}}}
+      - {name: genres_text, data_type: varchar, description: Comma-joined genre list.}
+      - {name: directors_text, data_type: varchar, description: Comma-joined director name list.}
+      - {name: writers_text, data_type: varchar, description: Comma-joined writer name list.}
+  - name: mart_top_tv_series
+    description: >
+      Display-ready top-500 TV series, grain tconst. Pre-shaped from mart_top_titles
+      (genres/directors/writers flattened to comma-joined text) so the Shiny app's default TV
+      series listing does nothing but an already-bounded scan - no per-query shaping work, which
+      matters most when storage is remote (see ADR 0013).
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: tconst, data_type: varchar, description: Title key., data_tests: [not_null, unique]}
+      - {name: primary_title, data_type: varchar, description: Searchable title text.}
+      - {name: original_title, data_type: varchar, description: Original title text.}
+      - {name: start_year, data_type: smallint, description: Release start year.}
+      - {name: end_year, data_type: smallint, description: Series end year.}
+      - {name: runtime_minutes, data_type: integer, description: "Episode runtime, in minutes."}
+      - {name: episode_count, data_type: bigint, description: Number of linked episodes.}
+      - {name: average_rating, data_type: double, description: Average rating measure.}
+      - {name: num_votes, data_type: bigint, description: Vote-count measure.}
+      - {name: title_rank, data_type: bigint, description: Rank by rating/votes, data_tests: [not_null], config: {meta: {1 is best.: null}}}
+      - {name: genres_text, data_type: varchar, description: Comma-joined genre list.}
+      - {name: directors_text, data_type: varchar, description: Comma-joined director name list.}
+      - {name: writers_text, data_type: varchar, description: Comma-joined writer name list.}
   - name: mart_genre_year_summary
     description: Title, rating, and vote summaries by year, title type, and genre, grain (start_year, title_type, genre).
     config:
@@ -74,6 +116,17 @@ models:
       - {name: average_rating, data_type: double, description: Optional title rating.}
       - {name: num_votes, data_type: bigint, description: Optional title vote count.}
       - {name: dlt_load_id, data_type: varchar, description: Raw credit lineage., data_tests: [not_null]}
+  - name: mart_title_cast
+    description: Cast credits (actor, actress, self) per title, sorted by tconst for the app's title lookups, grain (tconst, ordering).
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: tconst, data_type: varchar, description: Title key., data_tests: [not_null]}
+      - {name: nconst, data_type: varchar, description: Person key.}
+      - {name: primary_name, data_type: varchar, description: Person display name.}
+      - {name: category, data_type: varchar, description: "actor, actress, or self."}
+      - {name: ordering, data_type: integer, description: IMDb principal-credit ordering.}
+      - {name: characters, data_type: "varchar[]", description: "Character name array, if applicable."}
   - name: mart_series_episodes
     description: Series, season, and episode navigation with optional rating measures, grain episode_tconst.
     config:

@@ -16,3 +16,4 @@ should add a superseding ADR rather than rewriting history.
 - [0011: Fix dlt extract-stage parallelism and expose ingestion tuning knobs](0011-fix-dlt-extract-parallelism.md)
 - [0012: Restore isolated build staging for the PostgreSQL-backed catalog](0012-restore-build-staging-for-postgresql-catalog.md)
 - [0013: Use a Hugging Face Dataset repo, not a Bucket, for storage DuckLake reads directly](0013-hf-dataset-repo-for-remote-storage.md)
+- [0014: Bound disk usage per build](0014-bounded-disk-usage-per-build.md)

@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from io import StringIO
 
@@ -145,6 +146,50 @@ def test_loading_legacy_manifest_backfills_row_count(tmp_path) -> None:
 
     assert retained[0].manifest_entry.row_count == 1
     assert load_manifest(manifest_path).get(SPEC.table_name).row_count == 1
+
+
+def test_reuse_with_matching_checksum_keeps_recorded_row_count_without_recounting(
+    tmp_path,
+) -> None:
+    body = _archive()
+    raw_dir, manifest_path = _paths(tmp_path)
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, stream=httpx.ByteStream(body))
+        )
+    ) as client:
+        downloader = Downloader(client, clock=lambda: NOW)
+        downloader.download_all([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+        # A recount would overwrite this sentinel with the real count (1).
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["entries"][0]["row_count"] = 99
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        reused = downloader.download_all([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+
+    retained = load_verified_artifacts([SPEC], raw_dir=raw_dir, manifest_path=manifest_path)
+    assert reused[0].manifest_entry.row_count == 99
+    assert retained[0].manifest_entry.row_count == 99
+
+
+def test_reuse_still_checks_header_against_current_dataset_spec(tmp_path) -> None:
+    body = _archive()
+    raw_dir, manifest_path = _paths(tmp_path)
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, stream=httpx.ByteStream(body))
+        )
+    ) as client:
+        Downloader(client, clock=lambda: NOW).download_all(
+            [SPEC], raw_dir=raw_dir, manifest_path=manifest_path
+        )
+
+    with pytest.raises(AcquisitionError, match="Header mismatch"):
+        load_verified_artifacts(
+            [replace(SPEC, headers=("id", "renamed"))],
+            raw_dir=raw_dir,
+            manifest_path=manifest_path,
+        )
 
 
 def test_retained_artifacts_require_manifest_and_matching_checksum(tmp_path) -> None:
