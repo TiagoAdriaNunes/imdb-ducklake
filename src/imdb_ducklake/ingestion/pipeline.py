@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
 import re
 import time
 from dataclasses import dataclass
@@ -19,7 +21,6 @@ from loguru import logger
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
 from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import IngestionError
-from imdb_ducklake.ingestion.progress import RichProgressCollector
 from imdb_ducklake.ingestion.resources import build_ingestion_resources
 from imdb_ducklake.lakehouse.catalog import CatalogTarget
 from imdb_ducklake.lakehouse.lifecycle import BuildPaths
@@ -41,7 +42,6 @@ def ingest_snapshot(
     *,
     build_paths: BuildPaths,
     pipelines_dir: Path,
-    chunk_size: int = 50_000,
     progress: Collector | None = None,
     catalog_target: CatalogTarget | None = None,
     workers: int = 2,
@@ -86,7 +86,7 @@ def ingest_snapshot(
         override_data_path=True,
     )
     schema = Schema("raw", normalizers={"names": "direct"})
-    resources = build_ingestion_resources(artifacts, chunk_size=chunk_size)
+    resources = build_ingestion_resources(artifacts)
     total_bytes = sum(artifact.manifest_entry.size_bytes for artifact in artifacts)
     ingestion_logger = logger.bind(build_id=build_paths.build_id, stage="ingestion")
     ingestion_logger.info(
@@ -108,16 +108,9 @@ def ingest_snapshot(
         )
     pipeline_options: dict[str, Any] = {}
     if progress is not None:
-        if isinstance(progress, RichProgressCollector):
-            progress.set_expected_totals(
-                {
-                    artifact.dataset.table_name: artifact.manifest_entry.row_count
-                    for artifact in artifacts
-                    if artifact.manifest_entry.row_count is not None
-                }
-            )
         pipeline_options["progress"] = progress
     _restore_relation_fetchone()
+    _drop_removed_sqlglot_qualify_argument()
     started = time.monotonic()
 
     try:
@@ -133,18 +126,13 @@ def ingest_snapshot(
                 "extract.workers": workers,
                 "load.workers": workers,
                 "normalize.workers": workers,
-                "normalize.parquet_normalizer.add_dlt_load_id": True,
-                # Drop each package's parquet files once loaded; otherwise every build leaves
-                # ~2.6GB behind in pipelines_dir that nothing reads again.
+                # Drop each package's job files once loaded; nothing reads them again.
                 "load.delete_completed_jobs": True,
             }
         ):
-            load_info = pipeline.run(
-                resources,
-                schema=schema,
-                refresh="drop_data",
-                loader_file_format="parquet",
-            )
+            # No run-wide loader_file_format: it would override the raw resources' "model"
+            # format. ingestion_files gets DuckLake's preferred format, parquet.
+            load_info = pipeline.run(resources, schema=schema, refresh="drop_data")
         if load_info.has_failed_jobs:
             raise IngestionError(load_info.asstr(verbosity=1))
     except IngestionError:
@@ -207,3 +195,22 @@ def _restore_relation_fetchone() -> None:
 def _pipeline_name(build_id: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9_]", "_", build_id)
     return f"imdb_{normalized}"
+
+
+def _drop_removed_sqlglot_qualify_argument() -> None:
+    """Stop dlt 1.31 passing ``infer_schema`` to sqlglot's ``qualify``, removed in sqlglot 30.25.
+
+    dlt calls it when it builds the raw resources' SQL models. dlt's own fix (drop the argument)
+    ships only in releases that require DuckDB < 2. Delete this once a dlt release that supports
+    DuckDB 2 stops passing it.
+    """
+    lineage: Any = importlib.import_module("dlt.dataset.lineage")
+    qualify = lineage.qualify
+    if "infer_schema" in inspect.signature(qualify).parameters:
+        return
+
+    def qualify_without_infer_schema(expression: Any, **kwargs: Any) -> Any:
+        kwargs.pop("infer_schema", None)
+        return qualify(expression, **kwargs)
+
+    lineage.qualify = qualify_without_infer_schema

@@ -239,7 +239,6 @@ def ingest_command(
                         pipelines_dir=settings.dlt_pipelines_dir,
                         progress=_progress_collector(settings, paths.build_id),
                         workers=settings.ingest_workers,
-                        chunk_size=settings.ingest_chunk_size,
                     )
                 else:
                     result = ingest_snapshot(
@@ -249,7 +248,6 @@ def ingest_command(
                         progress=_progress_collector(settings, paths.build_id),
                         catalog_target=catalog_target,
                         workers=settings.ingest_workers,
-                        chunk_size=settings.ingest_chunk_size,
                     )
         typer.echo(
             f"Loaded {len(artifacts)} archives into build {paths.build_id} "

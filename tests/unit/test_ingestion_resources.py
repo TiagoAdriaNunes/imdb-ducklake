@@ -1,16 +1,15 @@
 import gzip
 import hashlib
-import warnings
 from datetime import UTC, datetime
 
-import pyarrow as pa
+import duckdb
 import pytest
 
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
 from imdb_ducklake.acquisition.manifest import ManifestEntry
 from imdb_ducklake.datasets import DatasetSpec
 from imdb_ducklake.exceptions import IngestionError
-from imdb_ducklake.ingestion.resources import build_ingestion_resources
+from imdb_ducklake.ingestion.resources import _read_csv_select, build_ingestion_resources
 
 SPEC = DatasetSpec(
     name="example",
@@ -41,24 +40,33 @@ def _artifact(tmp_path, rows: tuple[tuple[str, str], ...] = (("id1", "\\N"),)):
     return VerifiedArtifact(SPEC, path, entry)
 
 
-def test_raw_resource_preserves_headers_strings_and_null_literal(tmp_path) -> None:
-    artifact = _artifact(tmp_path, (("id1", "\\N"), ("id2", "")))
+def test_raw_query_reads_archive_losslessly(tmp_path) -> None:
+    quoted_dir = tmp_path / "it's"
+    quoted_dir.mkdir()
+    artifact = _artifact(quoted_dir, (("id1", "\\N"), ("id2", ""), ("id3", "Exámple 東京")))
 
-    raw_resource, metadata_resource = build_ingestion_resources((artifact,), chunk_size=1)
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        batches = list(raw_resource)
+    with duckdb.connect(":memory:") as connection:
+        relation = connection.sql(_read_csv_select(SPEC, artifact.path))
+        assert relation.columns == list(SPEC.headers)
+        assert set(relation.types) == {"VARCHAR"}
+        assert relation.fetchall() == [("id1", "\\N"), ("id2", ""), ("id3", "Exámple 東京")]
+
+
+def test_raw_resource_loads_as_frozen_sql_model(tmp_path) -> None:
+    artifact = _artifact(tmp_path)
+
+    raw_resource, metadata_resource = build_ingestion_resources((artifact,))
+    table = raw_resource.compute_table_schema()
     metadata = list(metadata_resource)
 
-    assert all(isinstance(batch, pa.RecordBatch) for batch in batches)
-    assert [batch.schema.names for batch in batches] == [list(SPEC.headers)] * 2
-    assert [batch.to_pylist()[0] for batch in batches] == [
-        {"recordId": "id1", "optionalValue": "\\N"},
-        {"recordId": "id2", "optionalValue": ""},
-    ]
+    assert table["name"] == SPEC.table_name
+    assert table["file_format"] == "model"
+    assert table["write_disposition"] == "replace"
+    assert list(table["columns"]) == list(SPEC.headers)
+    assert raw_resource.schema_contract == {"columns": "freeze", "data_type": "freeze"}
     assert metadata[0]["table_name"] == SPEC.table_name
     assert metadata[0]["batch_id"] == "batch-1"
-    assert metadata[0]["row_count"] == 2
+    assert metadata[0]["row_count"] == 1
 
 
 def test_resources_require_unique_existing_verified_artifacts(tmp_path) -> None:
@@ -72,8 +80,6 @@ def test_resources_require_unique_existing_verified_artifacts(tmp_path) -> None:
         build_ingestion_resources((artifact,))
 
 
-def test_resources_reject_empty_input_and_invalid_chunk_size() -> None:
+def test_resources_reject_empty_input() -> None:
     with pytest.raises(IngestionError, match="At least one"):
         build_ingestion_resources(())
-    with pytest.raises(ValueError, match="at least one"):
-        build_ingestion_resources((), chunk_size=0)
