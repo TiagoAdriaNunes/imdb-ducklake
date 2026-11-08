@@ -410,24 +410,22 @@ def validate_command(
                     working_directory=settings.repository_root,
                     catalog_target=catalog_target,
                 )
-            elif build_id is not None:
-                recover_interrupted_promotion(settings.lakehouse_dir)
-                paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
-                catalog_path = paths.catalog_path
-                storage_dir = paths.storage_dir
-                selected_id = paths.build_id
-            elif settings.current_dir.exists():
-                recover_interrupted_promotion(settings.lakehouse_dir)
-                catalog_path = settings.current_dir / "catalog.duckdb"
-                storage_dir = settings.current_dir / "storage"
-                selected_id = "current"
             else:
                 recover_interrupted_promotion(settings.lakehouse_dir)
-                paths = select_staged_build(settings.lakehouse_dir)
-                catalog_path = paths.catalog_path
-                storage_dir = paths.storage_dir
-                selected_id = paths.build_id
-            if catalog_target is None:
+                if build_id is not None:
+                    paths = select_staged_build(settings.lakehouse_dir, build_id=build_id)
+                    catalog_path = paths.catalog_path
+                    storage_dir = paths.storage_dir
+                    selected_id = paths.build_id
+                elif settings.current_dir.exists():
+                    catalog_path = settings.current_dir / "catalog.duckdb"
+                    storage_dir = settings.current_dir / "storage"
+                    selected_id = "current"
+                else:
+                    paths = select_staged_build(settings.lakehouse_dir)
+                    catalog_path = paths.catalog_path
+                    storage_dir = paths.storage_dir
+                    selected_id = paths.build_id
                 result = validate_catalog(
                     catalog_path=catalog_path,
                     storage_dir=storage_dir,

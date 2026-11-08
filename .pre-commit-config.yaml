@@ -11,6 +11,12 @@ repos:
         entry: uv run ruff check
         language: system
         types_or: [python, pyi]
+      - id: pyrefly-check
+        name: pyrefly check
+        entry: uv run pyrefly check
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
       - id: sqlfluff-lint
         name: sqlfluff lint
         entry: uv run sqlfluff lint

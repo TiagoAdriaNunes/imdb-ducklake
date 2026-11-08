@@ -6,7 +6,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -150,7 +150,7 @@ def cleanup_build(paths: BuildPaths) -> None:
 
 
 @contextmanager
-def temporary_build(paths: BuildPaths) -> Iterator[BuildPaths]:
+def temporary_build(paths: BuildPaths) -> Generator[BuildPaths]:
     """Create a build workspace and remove it automatically after any failure."""
     initialize_build(paths)
     try:
