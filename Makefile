@@ -59,7 +59,7 @@ help:
 	@echo "  make format          ruff format . (rewrites files)"
 	@echo "  make lint            ruff check ."
 	@echo "  make sql-lint        sqlfluff lint dbt/models dbt/tests"
-	@echo "  make typecheck       mypy src"
+	@echo "  make typecheck       pyrefly check"
 	@echo "  make dbt-parse       dbt parse --project-dir dbt --profiles-dir dbt"
 	@echo "  make coverage        unit tests only; excludes smoke and integration"
 	@echo "  make package         uv build"
@@ -149,7 +149,7 @@ sql-lint:
 	uv run sqlfluff lint dbt/models dbt/tests
 
 typecheck:
-	uv run mypy src
+	uv run pyrefly check
 
 dbt-parse:
 	$(DBT_ENV) uv run dbt parse --project-dir dbt --profiles-dir dbt --no-partial-parse

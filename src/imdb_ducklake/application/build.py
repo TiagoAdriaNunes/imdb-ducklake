@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -314,7 +314,7 @@ def build_lakehouse(
 
 
 @contextmanager
-def _scratch_cleared(settings: Settings, log: Logger) -> Iterator[None]:
+def _scratch_cleared(settings: Settings, log: Logger) -> Generator[None]:
     """Clear scratch before the build (a killed build's leftovers) and after it, even on failure."""
     _clear_scratch(settings, log)
     try:

@@ -33,7 +33,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.17",
+    "pyrefly>=1.4,<2",
     "pre-commit>=4.6.2",
     "pytest>=8.4",
     "pytest-cov>=6.2",
@@ -52,16 +52,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.ruff.format]
 quote-style = "double"
 
-[tool.mypy]
-python_version = "3.12"
-strict = true
-warn_unreachable = true
-show_error_codes = true
-pretty = true
-
-[[tool.mypy.overrides]]
-module = ["dlt", "dlt.*"]
-ignore_missing_imports = true
+[tool.pyrefly]
+python-version = "3.12"
+project-includes = ["src"]
+search-path = ["src"]
+ignore-missing-imports = ["dlt", "dlt.*"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"

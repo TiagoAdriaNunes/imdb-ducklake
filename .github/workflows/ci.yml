@@ -43,7 +43,7 @@ jobs:
         run: uv run sqlfluff lint dbt/models dbt/tests
 
       - name: Type check
-        run: uv run mypy src
+        run: uv run pyrefly check
 
       - name: Parse dbt project
         run: uv run dbt parse --project-dir dbt --profiles-dir dbt --no-partial-parse
