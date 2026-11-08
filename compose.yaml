@@ -51,6 +51,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     image: imdb-ducklake:latest
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
