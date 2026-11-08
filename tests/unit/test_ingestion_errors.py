@@ -1,9 +1,11 @@
 """Fast failure-boundary tests for the dlt ingestion pipeline."""
 
+import importlib
 from datetime import UTC, datetime
 
 import duckdb
 import pytest
+import sqlglot
 from dlt.common.runtime.collector import LogCollector
 
 from imdb_ducklake.acquisition.downloader import VerifiedArtifact
@@ -91,3 +93,12 @@ def test_restores_relation_fetchone_that_dlt_still_calls() -> None:
         assert connection.sql("SELECT 1 WHERE false").fetchone() is None
     finally:
         connection.close()
+
+
+def test_lets_dlt_pass_infer_schema_to_sqlglot_qualify() -> None:
+    ingestion_pipeline._drop_removed_sqlglot_qualify_argument()
+    ingestion_pipeline._drop_removed_sqlglot_qualify_argument()
+
+    lineage = importlib.import_module("dlt.dataset.lineage")
+    qualified = lineage.qualify(sqlglot.parse_one("SELECT 1 AS a"), infer_schema=True)
+    assert qualified.sql() == 'SELECT 1 AS "a"'

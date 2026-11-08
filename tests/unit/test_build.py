@@ -54,13 +54,11 @@ def _install_successful_stages(monkeypatch) -> None:
         pipelines_dir,
         progress,
         workers,
-        chunk_size,
         catalog_target=None,
     ):
         assert isinstance(progress, StructuredLogCollector)
         assert progress.log_period == 10.0
         assert workers >= 1
-        assert chunk_size >= 1
         build_paths.catalog_path.write_text("catalog", encoding="utf-8")
         (build_paths.storage_dir / "rows.parquet").write_text("rows", encoding="utf-8")
         return IngestionResult(
@@ -156,9 +154,7 @@ def test_postgresql_build_stages_writes_and_promotes_to_current(tmp_path, monkey
     downloader = FakeDownloader()
     calls: dict[str, object] = {}
 
-    def ingest(
-        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
-    ):
+    def ingest(artifacts, *, build_paths, pipelines_dir, progress, workers, catalog_target):
         calls["ingestion_target"] = catalog_target
         assert catalog_target.storage_dir == build_paths.storage_dir
         (catalog_target.storage_dir / "raw.parquet").write_text("raw", encoding="utf-8")
@@ -232,9 +228,7 @@ def test_postgresql_build_seeds_raw_storage_from_current(tmp_path, monkeypatch) 
     downloader = FakeDownloader()
     seeded_before_ingest: dict[str, str] = {}
 
-    def ingest(
-        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
-    ):
+    def ingest(artifacts, *, build_paths, pipelines_dir, progress, workers, catalog_target):
         seeded_before_ingest["content"] = (
             build_paths.storage_dir / "raw" / "_dlt_loads.parquet"
         ).read_text(encoding="utf-8")
@@ -277,9 +271,7 @@ def test_postgresql_first_build_has_no_raw_storage_to_seed(tmp_path, monkeypatch
     assert not settings.current_dir.exists()
     downloader = FakeDownloader()
 
-    def ingest(
-        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
-    ):
+    def ingest(artifacts, *, build_paths, pipelines_dir, progress, workers, catalog_target):
         assert not (build_paths.storage_dir / "raw").exists()
         return IngestionResult(
             "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir
@@ -316,9 +308,7 @@ def _postgresql_settings(tmp_path) -> Settings:
 
 
 def _install_postgresql_stages(monkeypatch, *, on_ingest=None, on_checkpoint=None) -> None:
-    def ingest(
-        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
-    ):
+    def ingest(artifacts, *, build_paths, pipelines_dir, progress, workers, catalog_target):
         if on_ingest is not None:
             on_ingest()
         (catalog_target.storage_dir / "raw.parquet").write_text("raw", encoding="utf-8")
@@ -460,9 +450,7 @@ def test_postgresql_build_failure_leaves_staged_build_for_retry(tmp_path, monkey
     )
     downloader = FakeDownloader()
 
-    def ingest(
-        artifacts, *, build_paths, pipelines_dir, progress, workers, chunk_size, catalog_target
-    ):
+    def ingest(artifacts, *, build_paths, pipelines_dir, progress, workers, catalog_target):
         (catalog_target.storage_dir / "raw.parquet").write_text("raw", encoding="utf-8")
         return IngestionResult(
             "fixture", "raw", ("load-1",), catalog_target.url, catalog_target.storage_dir

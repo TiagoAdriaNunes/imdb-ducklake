@@ -73,7 +73,6 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
         artifacts,
         build_paths=paths,
         pipelines_dir=tmp_path / "pipelines",
-        chunk_size=1,
     )
 
     assert result.load_ids
@@ -135,7 +134,6 @@ def test_loads_complete_lossless_snapshot_into_ducklake(tmp_path) -> None:
         replacement,
         build_paths=paths,
         pipelines_dir=tmp_path / "pipelines",
-        chunk_size=1,
     )
 
     assert replacement_result.load_ids != result.load_ids

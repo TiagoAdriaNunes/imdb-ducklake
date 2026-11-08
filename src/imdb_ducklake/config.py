@@ -51,7 +51,6 @@ class Settings:
     # Hugging Face Dataset repo (never hf://buckets/..., DuckDB cannot attach those - ADR 0013).
     storage_url: str | None = None
     ingest_workers: int = 2
-    ingest_chunk_size: int = 50_000
     # Per-build scratch space: dbt's controller DuckDB file (DuckDB spills large sorts/joins into a
     # `.tmp` dir next to it) and dlt's load packages. Defaults to data_dir. `build` empties it
     # before and after each run.
@@ -70,7 +69,6 @@ class Settings:
         catalog_url: str | None = None,
         storage_url: str | None = None,
         ingest_workers: int | None = None,
-        ingest_chunk_size: int | None = None,
     ) -> "Settings":
         root = find_repository_root(repository_root)
         raw_scratch = _env_or_none("IMDB_DUCKLAKE_SCRATCH_DIR")
@@ -109,17 +107,6 @@ class Settings:
                 ) from error
         if configured_workers <= 0:
             raise ConfigurationError("Ingest workers must be greater than zero")
-        configured_chunk_size = ingest_chunk_size
-        if configured_chunk_size is None:
-            raw_chunk_size = environ.get("IMDB_DUCKLAKE_INGEST_CHUNK_SIZE", "50000")
-            try:
-                configured_chunk_size = int(raw_chunk_size)
-            except ValueError as error:
-                raise ConfigurationError(
-                    "IMDB_DUCKLAKE_INGEST_CHUNK_SIZE must be an integer"
-                ) from error
-        if configured_chunk_size <= 0:
-            raise ConfigurationError("Ingest chunk size must be greater than zero")
 
         configured_environment = (environment or environ.get("IMDB_DUCKLAKE_ENV", "local")).lower()
         if configured_environment not in _ENVIRONMENTS:
@@ -171,7 +158,6 @@ class Settings:
             catalog_url=resolved_catalog_url,
             storage_url=resolved_storage_url,
             ingest_workers=configured_workers,
-            ingest_chunk_size=configured_chunk_size,
             scratch_dir=configured_scratch,
         )
 

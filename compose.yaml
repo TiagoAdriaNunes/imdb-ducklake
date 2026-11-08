@@ -34,7 +34,6 @@ services:
       IMDB_DUCKLAKE_DBT_THREADS: ${IMDB_DUCKLAKE_DBT_THREADS:-2}
       IMDB_DUCKLAKE_QUERY_THREADS: ${IMDB_DUCKLAKE_QUERY_THREADS:-2}
       IMDB_DUCKLAKE_INGEST_WORKERS: ${IMDB_DUCKLAKE_INGEST_WORKERS:-2}
-      IMDB_DUCKLAKE_INGEST_CHUNK_SIZE: ${IMDB_DUCKLAKE_INGEST_CHUNK_SIZE:-50000}
       IMDB_LAKEHOUSE_LOG_LEVEL: ${IMDB_LAKEHOUSE_LOG_LEVEL:-DEBUG}
       # Docker Desktop currently exposes about 8GB. Leave headroom for Python, dbt, dlt, and WSL;
       # exceeding the cgroup limit makes Linux SIGKILL dbt with exit code -9.
