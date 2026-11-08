@@ -60,6 +60,10 @@ project-includes = ["src"]
 search-path = ["src"]
 ignore-missing-imports = ["dlt", "dlt.*"]
 
+[tool.uv]
+# dbt-core 1.12 pulls a parser wheel from GitHub during image builds.
+constraint-dependencies = ["dbt-core<1.12"]
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
