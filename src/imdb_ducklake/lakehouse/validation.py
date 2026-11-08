@@ -179,7 +179,7 @@ def _execute_validation(
                 str(name): int(row_count) for name, row_count in payload["mart_row_counts"].items()
             },
         )
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    except (KeyError, TypeError, ValueError) as error:
         raise ValidationError("Fresh-process validation returned an invalid result") from error
 
 
@@ -207,7 +207,7 @@ def _validate_read_only(
         connection = duckdb.connect(":memory:")
         try:
             connection.execute("LOAD ducklake")
-            catalog_value = str(catalog)
+            catalog_value = catalog
             metadata_path = (
                 catalog_value
                 if catalog_value.startswith("postgres:")
