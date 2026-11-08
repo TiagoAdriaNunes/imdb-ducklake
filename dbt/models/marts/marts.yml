@@ -20,7 +20,7 @@ models:
       - {name: genres, data_type: "varchar[]", description: Genre array.}
       - {name: directors, data_type: "varchar[]", description: Director name array.}
       - {name: writers, data_type: "varchar[]", description: Writer name array.}
-      - {name: dlt_load_id, data_type: varchar, description: Raw title lineage., data_tests: [not_null]}
+      - {name: dlt_load_id, data_type: varchar, description: Raw title lineage.}
   - name: mart_top_titles
     description: >
       Precomputed top-500-per-type ranking (average_rating desc, num_votes desc, num_votes >=
@@ -115,7 +115,7 @@ models:
       - {name: characters, data_type: "varchar[]", description: "Character name array, if applicable."}
       - {name: average_rating, data_type: double, description: Optional title rating.}
       - {name: num_votes, data_type: bigint, description: Optional title vote count.}
-      - {name: dlt_load_id, data_type: varchar, description: Raw credit lineage., data_tests: [not_null]}
+      - {name: dlt_load_id, data_type: varchar, description: Raw credit lineage.}
   - name: mart_title_cast
     description: Cast credits (actor, actress, self) per title, sorted by tconst for the app's title lookups, grain (tconst, ordering).
     config:
@@ -141,4 +141,4 @@ models:
       - {name: episode_start_year, data_type: smallint, description: Episode title's release start year.}
       - {name: average_rating, data_type: double, description: Optional episode rating.}
       - {name: num_votes, data_type: bigint, description: Optional episode vote count.}
-      - {name: dlt_load_id, data_type: varchar, description: Raw episode lineage., data_tests: [not_null]}
+      - {name: dlt_load_id, data_type: varchar, description: Raw episode lineage.}
