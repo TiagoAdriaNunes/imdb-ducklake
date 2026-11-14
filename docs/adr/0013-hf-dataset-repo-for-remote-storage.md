@@ -60,12 +60,9 @@ the repo must contain `marts/<table>__dbt_tmp/...`, not `<table>__dbt_tmp/...` a
   `hf://buckets/...`.
 - Buckets remain useful as plain file storage/transfer (what they were already used for before
   this ADR), just not as something DuckLake can attach to directly.
-- `make upload-bucket` (`Makefile`) still uploads to a Bucket via `hf buckets sync` and is not yet
-  updated to publish to the Dataset repo instead - it works for moving files around, but its
-  output is not directly attachable the way a Dataset repo upload is. Bringing it in line (an
-  `hf upload ... --type dataset` equivalent, preserving the `marts/` prefix) is a follow-up, not
-  done as part of this ADR.
-- The app itself (`query/service.py`) does not yet have a code path that attaches at an
-  `hf://datasets/...` `DATA_PATH` - this ADR only records that the mechanism works and what it
-  requires; wiring it into `Settings`/`configured_attach_sql` is separate, deliberately deferred
-  work.
+- `make upload-bucket` was replaced by `make upload-dataset`: one `hf upload --type dataset`
+  commit that keeps the `marts/` prefix and deletes the previous build's parquet, so the repo
+  mirrors the catalog's current snapshot. Rerun it after every promoted build - the catalog
+  references exact file names, so a stale repo breaks remote reads.
+- The app reads it via `IMDB_DUCKLAKE_STORAGE_URL` (`Settings.storage_url`). Only data lives on
+  Hugging Face; the catalog stays in PostgreSQL.
