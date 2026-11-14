@@ -33,7 +33,7 @@ endif
 
 .PHONY: help sync format format-check lint sql-lint typecheck dbt-parse test smoke coverage docs \
 	publish-docs package ci download ingest transform build validate promote checkpoint shell \
-	shell-ui clean-dlt-pipelines upload-dataset docker-image docker-up docker-build docker-down \
+	shell-ui clean-dlt-pipelines upload-dataset upload-b2 docker-image docker-up docker-build docker-down \
 	docker-status docker-download docker-ingest docker-transform docker-validate docker-promote \
 	docker-checkpoint docker-app docker-app-logs docker-image-ready docker-docs docker-publish-docs
 
@@ -89,7 +89,8 @@ help:
 	@echo "  make docker-shell    same, attached to the PostgreSQL-backed catalog (needs docker-up)"
 	@echo "  make docker-shell-ui same, and opens DuckDB's local web UI in your browser"
 	@echo "  make clean-dlt-pipelines  delete old dlt working dirs, keep the newest KEEP=3"
-	@echo "  make upload-dataset  hf upload data/ducklake/current/storage/marts (app-required data) to the HF Dataset repo \$$HF_DATASET_REPO (required, e.g. <you>/<name> - see ADR 0013: Buckets aren't attachable by DuckDB)"
+	@echo "  make upload-dataset  replace the marts in the private HF Dataset repo \$$HF_DATASET_REPO (from .env) with the current build (ADR 0013)"
+	@echo "  make upload-b2       same, to the private Backblaze B2 bucket \$$B2_BUCKET (default imdb-ducklake; keys from .env, DRY=1 to preview)"
 
 sync:
 	uv sync --locked
@@ -230,12 +231,30 @@ clean-dlt-pipelines:
 	if [ "$(DRY)" = "1" ]; then echo "(dry run, nothing deleted; rerun without DRY=1)"; exit 0; fi; \
 	echo "$$victims" | xargs -r rm -rf --
 
-# DuckDB's hf:// filesystem only attaches hf://datasets/... or hf://spaces/..., never
-# hf://buckets/... (see ADR 0013) - this must publish to a Dataset repo, not a Bucket, for the
-# result to be directly readable by a DuckLake ATTACH. `marts` is uploaded as a path prefix (not
-# flattened) so a later ATTACH's DATA_PATH can be the repo root, matching current/storage's own
-# layout (marts/ alongside raw/ and intermediate/).
+# Publishes the promoted marts to a private HF Dataset repo (not a Bucket: DuckDB can't attach
+# hf://buckets/..., ADR 0013). Keeps the marts/ prefix so DATA_PATH can be the repo root.
+# --delete (relative to marts/, uploaded files are spared) drops the previous build's parquet in
+# the same commit, so the repo always mirrors the catalog's current snapshot. Not "*": on Windows
+# hf.exe (Click) globs its own args against the CWD, quoted or not, so a pattern must match no
+# local file - *.parquet matches nothing in the repo root.
+# HF_DATASET_REPO falls back to .env, which Make doesn't load on its own.
+HF_DATASET_REPO ?= $(shell sed -n 's/^HF_DATASET_REPO=//p' .env 2>/dev/null | tr -d '\r"')
+MARTS_DIR := data/ducklake/current/storage/marts
 upload-dataset:
-	@test -n "$(HF_DATASET_REPO)" || { echo "set HF_DATASET_REPO, e.g. HF_DATASET_REPO=<you>/<name> make upload-dataset"; exit 1; }
-	hf upload $(HF_DATASET_REPO) ./data/ducklake/current/storage/marts marts --type dataset \
-		--commit-message "Upload marts data" $(ARGS)
+	@test -n "$(HF_DATASET_REPO)" || { echo "set HF_DATASET_REPO in .env or the environment, e.g. HF_DATASET_REPO=<you>/<name>"; exit 1; }
+	@test -d "$(MARTS_DIR)" || { echo "no promoted marts at $(MARTS_DIR) - run a build first"; exit 1; }
+	@hf auth whoami >/dev/null 2>&1 || { echo "not logged in to Hugging Face - run: hf auth login"; exit 1; }
+	hf upload $(HF_DATASET_REPO) ./$(MARTS_DIR) marts --type dataset --private --delete "*.parquet" \
+		--commit-message "Replace marts with build of $$(date -u +%Y-%m-%dT%H:%MZ)" $(ARGS)
+
+# Same marts/ layout to a private Backblaze B2 bucket; --delete drops the previous build's parquet.
+# Keys are read from .env inside the recipe so they never appear in make's echoed command.
+# DRY=1 previews the sync without changing the bucket.
+B2_BUCKET ?= imdb-ducklake
+upload-b2:
+	@test -d "$(MARTS_DIR)" || { echo "no promoted marts at $(MARTS_DIR) - run a build first"; exit 1; }
+	@grep -q '^BLAZE_KEY_ID=.' .env && grep -q '^BLAZE_TOKEN=.' .env || { echo "set BLAZE_KEY_ID and BLAZE_TOKEN in .env"; exit 1; }
+	B2_APPLICATION_KEY_ID="$$(sed -n 's/^BLAZE_KEY_ID=//p' .env | tr -d '\r"')" \
+	B2_APPLICATION_KEY="$$(sed -n 's/^BLAZE_TOKEN=//p' .env | tr -d '\r"')" \
+		uvx --from b2 b2 sync --delete --no-progress $(if $(filter 1,$(DRY)),--dry-run) \
+		./$(MARTS_DIR) b2://$(B2_BUCKET)/marts $(ARGS)
