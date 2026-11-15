@@ -99,22 +99,24 @@ def test_local_environment_rejects_stray_catalog_url(tmp_path, monkeypatch) -> N
         Settings.load(repository_root=root)
 
 
-def test_local_environment_rejects_stray_storage_url(tmp_path, monkeypatch) -> None:
+def test_local_environment_ignores_remote_storage(tmp_path, monkeypatch) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "pyproject.toml").touch()
-    monkeypatch.setenv("IMDB_DUCKLAKE_STORAGE_URL", "hf://datasets/you/name")
+    monkeypatch.setenv("IMDB_DUCKLAKE_REMOTE_STORAGE", "hf")
 
-    with pytest.raises(ConfigurationError, match="IMDB_DUCKLAKE_ENV is 'local'"):
-        Settings.load(repository_root=root)
+    settings = Settings.load(repository_root=root)
+
+    assert settings.environment == "local"
+    assert settings.storage_url is None
 
 
 def test_local_environment_ignores_empty_string_env_vars(tmp_path, monkeypatch) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "pyproject.toml").touch()
-    # Mirrors compose.yaml's `${IMDB_DUCKLAKE_STORAGE_URL:-}` - present but empty, not absent.
-    monkeypatch.setenv("IMDB_DUCKLAKE_STORAGE_URL", "")
+    # Mirrors compose.yaml's `${IMDB_DUCKLAKE_REMOTE_STORAGE:-}` - present but empty, not absent.
+    monkeypatch.setenv("IMDB_DUCKLAKE_REMOTE_STORAGE", "")
 
     settings = Settings.load(repository_root=root)
 
@@ -136,50 +138,92 @@ def test_docker_environment_computes_default_catalog_url(tmp_path, monkeypatch) 
     assert settings.storage_url is None
 
 
-def test_docker_environment_rejects_stray_storage_url(tmp_path, monkeypatch) -> None:
+def test_docker_environment_ignores_remote_storage(tmp_path, monkeypatch) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "pyproject.toml").touch()
-    monkeypatch.setenv("IMDB_DUCKLAKE_STORAGE_URL", "hf://datasets/you/name")
-
-    with pytest.raises(ConfigurationError, match="IMDB_DUCKLAKE_ENV is 'docker'"):
-        Settings.load(repository_root=root, environment="docker")
-
-
-def test_docker_environment_ignores_empty_string_storage_url(tmp_path, monkeypatch) -> None:
-    root = tmp_path / "project"
-    root.mkdir()
-    (root / "pyproject.toml").touch()
-    # Mirrors compose.yaml's `${IMDB_DUCKLAKE_STORAGE_URL:-}` - present but empty, not absent.
-    monkeypatch.setenv("IMDB_DUCKLAKE_STORAGE_URL", "")
+    monkeypatch.setenv("IMDB_DUCKLAKE_REMOTE_STORAGE", "b2")
 
     settings = Settings.load(repository_root=root, environment="docker")
 
+    assert settings.environment == "docker"
     assert settings.storage_url is None
 
 
-def test_docker_cloud_requires_storage_url(tmp_path) -> None:
+@pytest.mark.parametrize("value", [None, "gcs"])
+def test_docker_cloud_requires_hf_or_b2(tmp_path, monkeypatch, value) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "pyproject.toml").touch()
+    monkeypatch.delenv("IMDB_DUCKLAKE_REMOTE_STORAGE", raising=False)
 
-    with pytest.raises(ConfigurationError, match="docker-cloud requires IMDB_DUCKLAKE_STORAGE_URL"):
-        Settings.load(repository_root=root, environment="docker-cloud")
+    with pytest.raises(ConfigurationError, match="REMOTE_STORAGE=hf or b2"):
+        Settings.load(repository_root=root, environment="docker-cloud", remote_storage=value)
 
 
-def test_docker_cloud_resolves_storage_url(tmp_path) -> None:
+def test_docker_cloud_hf_reads_the_upload_dataset_repo(tmp_path, monkeypatch) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "pyproject.toml").touch()
+    monkeypatch.setenv("IMDB_DUCKLAKE_REMOTE_STORAGE", "HF")
+    monkeypatch.setenv("HF_DATASET_REPO", "you/name")
+    # Both remotes configured at once: only the selected one is used.
+    monkeypatch.setenv("B2_BUCKET", "bucket")
+    monkeypatch.setenv("BLAZE_ENDPOINT", "not-an-endpoint")
 
-    settings = Settings.load(
-        repository_root=root,
-        environment="docker-cloud",
-        storage_url="hf://datasets/you/name",
-    )
+    settings = Settings.load(repository_root=root, environment="docker-cloud")
 
     assert settings.environment == "docker-cloud"
     assert settings.storage_url == "hf://datasets/you/name"
+    assert settings.s3_endpoint is None
+
+
+def test_docker_cloud_hf_requires_dataset_repo(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.delenv("HF_DATASET_REPO", raising=False)
+
+    with pytest.raises(ConfigurationError, match="requires HF_DATASET_REPO"):
+        Settings.load(repository_root=root, environment="docker-cloud", remote_storage="hf")
+
+
+def test_docker_cloud_b2_reads_the_upload_bucket(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.setenv("B2_BUCKET", "imdb-ducklake")
+    monkeypatch.setenv("BLAZE_ENDPOINT", "https://s3.us-east-005.backblazeb2.com/")
+
+    settings = Settings.load(repository_root=root, environment="docker-cloud", remote_storage="b2")
+
+    assert settings.storage_url == "s3://imdb-ducklake"
+    assert settings.s3_endpoint == "s3.us-east-005.backblazeb2.com"
+    assert settings.s3_region == "us-east-005"
+
+
+@pytest.mark.parametrize("missing", ["B2_BUCKET", "BLAZE_ENDPOINT"])
+def test_docker_cloud_b2_requires_bucket_and_endpoint(tmp_path, monkeypatch, missing) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.setenv("B2_BUCKET", "imdb-ducklake")
+    monkeypatch.setenv("BLAZE_ENDPOINT", "s3.us-east-005.backblazeb2.com")
+    monkeypatch.delenv(missing)
+
+    with pytest.raises(ConfigurationError, match=f"requires {missing}"):
+        Settings.load(repository_root=root, environment="docker-cloud", remote_storage="b2")
+
+
+def test_docker_cloud_b2_rejects_endpoint_without_region(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.setenv("B2_BUCKET", "imdb-ducklake")
+    monkeypatch.setenv("BLAZE_ENDPOINT", "storage.example.com")
+
+    with pytest.raises(ConfigurationError, match=r"s3\.<region>\.backblazeb2\.com"):
+        Settings.load(repository_root=root, environment="docker-cloud", remote_storage="b2")
 
 
 def test_explicit_settings_override_environment(tmp_path, monkeypatch) -> None:
@@ -229,3 +273,32 @@ def test_invalid_observability_settings_are_rejected(tmp_path, values, message) 
 
     with pytest.raises(ConfigurationError, match=message):
         Settings.load(repository_root=root, **values)
+
+
+def test_app_preload_defaults_to_true(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.delenv("IMDB_DUCKLAKE_APP_PRELOAD", raising=False)
+
+    assert Settings.load(repository_root=root).app_preload is True
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("false", False), ("0", False), (" Yes ", True)])
+def test_app_preload_reads_environment(tmp_path, monkeypatch, raw, expected) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.setenv("IMDB_DUCKLAKE_APP_PRELOAD", raw)
+
+    assert Settings.load(repository_root=root).app_preload is expected
+
+
+def test_invalid_app_preload_is_rejected(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").touch()
+    monkeypatch.setenv("IMDB_DUCKLAKE_APP_PRELOAD", "sometimes")
+
+    with pytest.raises(ConfigurationError, match="IMDB_DUCKLAKE_APP_PRELOAD"):
+        Settings.load(repository_root=root)

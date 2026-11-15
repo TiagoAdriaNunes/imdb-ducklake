@@ -16,16 +16,18 @@ flowchart LR
     ingest --> raw[DuckLake raw VARCHAR tables\nload lineage]
     raw --> staging[dbt staging views\nNULL normalization + typed columns]
     staging --> intermediate[dbt dimensions, facts, bridges, rollups]
-    intermediate --> marts[Four materialized analytical marts]
-    marts --> validate[Fresh-process read-only validation]
+    intermediate --> marts[Materialized analytical marts]
+    marts --> app[dbt app schema\napp-shaped slices of the marts]
+    app --> validate[Fresh-process read-only validation]
     raw --> parquet[(Parquet\n/data/ducklake/storage)]
     marts --> parquet
+    app --> parquet
     raw --> postgres[(PostgreSQL\nDuckLake metadata)]
     marts --> postgres
     validate -->|all gates pass| publish[Published DuckLake snapshot]
     postgres --> query[Embedded DuckDB\nread-only attachment]
     parquet --> query
-    query --> shiny[Shiny application]
+    query -->|app schema preloaded into memory| shiny[Shiny application]
 ```
 
 Acquisition verifies a complete immutable source set. Ingestion and transformation attach DuckLake
@@ -48,7 +50,7 @@ of truth for Docker or Shiny.
 | `lakehouse` | Paths, locks, space gates, cleanup, promotion, validation | Exceptions and its own lifecycle types |
 | `ingestion` | dlt resources and DuckLake raw loading | Acquisition contracts, datasets, lakehouse paths |
 | `transformation` | Explicit dbt process invocation | Lakehouse paths and exceptions |
-| `query` | Read-only DuckLake attachment and mart queries | Settings, exceptions, and catalog target |
+| `query` | Read-only DuckLake attachment, app-schema preload, and app queries | Settings, exceptions, catalog target, and validation's relation list |
 | `application` | Complete build use case and stage sequencing | Every inner component |
 | `cli` | User-facing composition and stable exit codes | Application and stage entry points |
 
@@ -71,7 +73,9 @@ Python.
   typed analytical values.
 - Intermediate models define stable grains for titles, people, ratings, episodes, genres, credits,
   crew, and alternate titles.
-- Marts materialize the query shapes consumed by the Shiny application.
+- Marts materialize complete, general-purpose analytical tables.
+- The `app` schema holds thin, display-ready slices of the marts that the Shiny application reads
+  and preloads (ADR 0016); only it is uploaded to remote storage.
 
 The full interactive lineage graph, generated fresh from the current models, is published at
 [tiagoadrianunes.github.io/imdb-ducklake](https://tiagoadrianunes.github.io/imdb-ducklake/).

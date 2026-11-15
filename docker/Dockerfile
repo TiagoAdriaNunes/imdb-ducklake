@@ -13,8 +13,8 @@ COPY README.md LICENSE ./
 
 RUN uv sync --locked --no-dev --extra app
 
-# Bake DuckLake into the image so the one-shot build does not fetch it at runtime.
-RUN uv run --no-sync python -c "import duckdb; con = duckdb.connect(':memory:'); con.execute('INSTALL ducklake; INSTALL postgres;')" \
+# Bake the extensions into the image so nothing is fetched at runtime (httpfs + aws: remote storage).
+RUN uv run --no-sync python -c "import duckdb; con = duckdb.connect(':memory:'); con.execute('INSTALL ducklake; INSTALL postgres; INSTALL httpfs; INSTALL aws;')" \
     && chmod +x /usr/local/bin/imdb-lakehouse-entrypoint
 
 ENV IMDB_LAKEHOUSE_DATA_DIR=/data

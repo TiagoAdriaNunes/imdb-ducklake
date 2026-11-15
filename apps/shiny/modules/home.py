@@ -5,14 +5,38 @@ from __future__ import annotations
 import html
 import json
 import re
+import threading
 
 import pandas as pd
 from itables.shiny import DT
+from loguru import logger
 from shiny import module, reactive, render, ui
 
 from imdb_ducklake.config import Settings
 from imdb_ducklake.exceptions import NoPromotedBuildError
-from imdb_ducklake.query.service import connect_readonly, get_title_cast, search_titles
+from imdb_ducklake.query.service import (
+    SharedConnection,
+    connect_readonly,
+    get_title_cast,
+    search_titles,
+)
+
+# Every session shares one connection, so the app tables are preloaded once per process.
+_CONNECTION = SharedConnection(lambda: connect_readonly(Settings.load()))
+
+
+def warm_up() -> None:
+    """Open and preload the shared connection in the background, before the first session."""
+
+    def _open() -> None:
+        try:
+            _CONNECTION.get()
+        except NoPromotedBuildError as error:
+            # Sessions retry and show the error in the UI.
+            logger.warning("App warm-up failed: {}", error, event_code="app_warm_up_failed")
+
+    threading.Thread(target=_open, name="app-warm-up", daemon=True).start()
+
 
 _WRAP_COLUMNS = ("Directors", "Writers")
 _WRAP_WIDTH_PX = 320
@@ -78,11 +102,10 @@ def titles_server(
     show_end_year: bool,
 ) -> None:
     """Serve one title-type tab from the configured DuckLake catalog."""
-    settings = Settings.load()
     startup_error: str | None = None
     connection = None
     try:
-        connection = connect_readonly(settings)
+        connection = _CONNECTION.get()
     except NoPromotedBuildError as error:
         startup_error = str(error)
 

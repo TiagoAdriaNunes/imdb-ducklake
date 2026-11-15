@@ -13,7 +13,11 @@ from imdb_ducklake.config import Settings
 from imdb_ducklake.datasets import DATASETS
 from imdb_ducklake.exceptions import LifecycleError
 from imdb_ducklake.lakehouse.lifecycle import select_staged_build
-from imdb_ducklake.lakehouse.validation import REQUIRED_RELATIONS, validate_catalog
+from imdb_ducklake.lakehouse.validation import (
+    COUNTED_SCHEMAS,
+    REQUIRED_RELATIONS,
+    validate_catalog,
+)
 
 pytestmark = pytest.mark.smoke
 
@@ -75,7 +79,11 @@ def test_full_catalog_passes_fresh_process_read_only_validation(
     )
 
     assert result.relation_count == sum(len(names) for names in REQUIRED_RELATIONS.values())
-    assert set(result.mart_row_counts) == REQUIRED_RELATIONS["marts"]
+    assert set(result.mart_row_counts) == {
+        f"{schema}.{relation}"
+        for schema in COUNTED_SCHEMAS
+        for relation in REQUIRED_RELATIONS[schema]
+    }
     assert all(row_count > 0 for row_count in result.mart_row_counts.values())
     print(f"validated {result.build_id}: {result.mart_row_counts}")
 

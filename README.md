@@ -11,7 +11,7 @@ The project uses:
 - **DuckLake and Parquet** for table metadata, snapshots, and analytical storage
 - **DuckDB** as the embedded execution engine used by dlt, dbt, validation, and the application
 - **dbt** for typed staging models, tests, and analytics-ready marts
-- **Shiny for Python** for interactive exploration of the analytical marts
+- **Shiny for Python** for interactive title search, served from a small dbt `app` schema
 
 > IMDb permits these datasets for personal and non-commercial use. This repository contains code
 > and miniature synthetic fixtures only. It never redistributes IMDb source archives, extracted
@@ -115,11 +115,39 @@ retains the raw archives and Parquet data under `data/ducklake/storage/` on the 
 storage without repeating ingestion. dlt and dbt concurrency remain internal settings; callers do
 not create or coordinate process workers.
 
-`make docker-app` starts the Shiny application at <http://localhost:8000>. The app executes queries
-with an in-process DuckDB connection, reads DuckLake metadata from the same PostgreSQL service, and
-reads the existing Parquet files from the read-only `/data/ducklake/storage` mount. Stop the app and
-PostgreSQL with `make docker-down`; this preserves the stopped containers and all data so the next
-`make docker-app` starts the same containers. Use `make docker-app-logs` to follow its logs.
+`make docker-app` starts the Shiny application at <http://localhost:8000>. The app reads only the
+dbt `app` schema (about 165 MB; see [ADR 0016](docs/adr/0016-app-serving-layer.md)): at startup
+it copies those tables into an in-process DuckDB database, then answers every search and cast lookup
+from memory. `IMDB_DUCKLAKE_APP_PRELOAD=false` skips the copy and queries the Parquet files directly.
+Stop the app and PostgreSQL with `make docker-down`; this preserves the stopped containers and all
+data so the next `make docker-app` starts the same containers. Use `make docker-app-logs` to follow
+its logs.
+
+### Serve the app from Hugging Face or Backblaze B2
+
+With `IMDB_DUCKLAKE_ENV=docker-cloud` in `.env`, the app reads the `app` Parquet files from
+remote storage instead of the `./data` mount. The table catalog still comes from PostgreSQL, so
+the remote copy must come from the same build. Keep both remotes configured in `.env` and pick
+one with `IMDB_DUCKLAKE_REMOTE_STORAGE`. It reads the same values the upload targets use, so the
+app always reads what you published:
+
+| `IMDB_DUCKLAKE_REMOTE_STORAGE` | Reads | Settings in `.env` | Publish with |
+| --- | --- | --- | --- |
+| `hf` ([ADR 0013](docs/adr/0013-hf-dataset-repo-for-remote-storage.md)) | `hf://datasets/$HF_DATASET_REPO` | `HF_DATASET_REPO`, `HF_TOKEN` | `make upload-dataset` |
+| `b2` ([ADR 0017](docs/adr/0017-backblaze-b2-remote-storage.md)) | `s3://$B2_BUCKET` | `B2_BUCKET`, `BLAZE_ENDPOINT`, `BLAZE_KEY_ID`, `BLAZE_TOKEN` | `make upload-b2` |
+
+`BLAZE_ENDPOINT` is the bucket's S3 endpoint, e.g. `s3.us-east-005.backblazeb2.com`. Compose
+passes the B2 key to the app as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, so it never appears
+in SQL. Use an application key: B2's S3 API rejects the master key.
+
+```console
+make docker-build      # the PostgreSQL catalog and the uploaded files must come from one build
+make upload-dataset    # or: make upload-b2
+make docker-app
+```
+
+Switching storage needs no new image: change the selector and run `make docker-app` again. Compose
+recreates the app container when its environment changes.
 
 The Docker defaults are sized for an 8 GB Docker Desktop VM: one concurrent dbt node, two DuckDB
 query threads, and a 6 GB DuckDB memory limit. Override `IMDB_DUCKLAKE_DBT_THREADS`,
@@ -334,7 +362,7 @@ After ingestion, run every dbt model and data-quality test against the staged Du
 make transform
 ```
 
-The command builds the `staging`, `intermediate`, and `marts` schemas and prints dbt's complete
+The command builds the `staging`, `intermediate`, `marts`, and `app` schemas and prints dbt's complete
 result. Known sparse IMDb relationship gaps are measured as ratios and fail the build if they
 exceed 0.01%; they are not patched in the source data. Large title-search arrays are materialized
 as separate rollups to keep peak DuckDB memory bounded. If more than one staged build exists,

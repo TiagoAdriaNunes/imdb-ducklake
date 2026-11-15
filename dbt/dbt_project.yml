@@ -23,5 +23,13 @@ models:
     marts:
       +schema: marts
       +materialized: table
+    # App serving layer (ADR 0016). Schema-scoped DuckLake options: smaller zstd files read
+    # faster from remote storage. Set before each build; they persist in the catalog.
+    app:
+      +schema: app
+      +materialized: table
+      +pre-hook:
+        - "call {{ this.database }}.set_option('parquet_compression', 'zstd', schema => '{{ this.schema }}')"
+        - "call {{ this.database }}.set_option('target_file_size', '32MB', schema => '{{ this.schema }}')"
 flags:
   require_generic_test_arguments_property: true
