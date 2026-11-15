@@ -1,5 +1,6 @@
 """Application configuration and repository-relative path resolution."""
 
+import re
 from dataclasses import dataclass
 from os import environ
 from pathlib import Path
@@ -17,6 +18,12 @@ def find_repository_root(start: Path | None = None) -> Path:
 
 
 _ENVIRONMENTS = {"local", "docker", "docker-cloud"}
+_BOOLEAN_VALUES = {"true": True, "1": True, "yes": True, "false": False, "0": False, "no": False}
+# IMDB_DUCKLAKE_REMOTE_STORAGE: a Hugging Face Dataset repo (ADR 0013) or a Backblaze B2 bucket
+# (ADR 0017), named by the same .env values the upload targets use.
+_REMOTE_STORAGES = {"hf", "b2"}
+# s3.<region>.backblazeb2.com
+_S3_ENDPOINT_REGION = re.compile(r"^s3\.([a-z0-9-]+)\.")
 
 
 def _env_or_none(name: str) -> str | None:
@@ -33,6 +40,31 @@ def _default_docker_catalog_url() -> str:
     return f"postgresql://{user}:{password}@localhost:{port}/{database}"
 
 
+def _require_env(name: str, remote_storage: str, example: str) -> str:
+    value = _env_or_none(name)
+    if value is None:
+        raise ConfigurationError(
+            f"IMDB_DUCKLAKE_REMOTE_STORAGE={remote_storage} requires {name} (e.g. {example})"
+        )
+    return value.strip()
+
+
+def _resolve_remote_storage(remote_storage: str) -> tuple[str, str | None]:
+    """Return (storage_url, s3_endpoint) for IMDB_DUCKLAKE_REMOTE_STORAGE."""
+    if remote_storage == "hf":
+        repo = _require_env("HF_DATASET_REPO", remote_storage, "<you>/<name>")
+        # Always a Dataset repo: DuckDB can't attach hf://buckets/... (ADR 0013).
+        return f"hf://datasets/{repo}", None
+    bucket = _require_env("B2_BUCKET", remote_storage, "imdb-ducklake")
+    endpoint = _require_env("BLAZE_ENDPOINT", remote_storage, "s3.us-east-005.backblazeb2.com")
+    endpoint = endpoint.removeprefix("https://").rstrip("/")
+    if not _S3_ENDPOINT_REGION.match(endpoint):
+        raise ConfigurationError(
+            f"BLAZE_ENDPOINT must look like s3.<region>.backblazeb2.com, got {endpoint!r}"
+        )
+    return f"s3://{bucket}", endpoint
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Resolved application settings, created once by the CLI."""
@@ -43,18 +75,24 @@ class Settings:
     log_format: str = "console"
     progress_interval_seconds: float = 10.0
     # One of "local" (no shared catalog), "docker" (shared PostgreSQL catalog, local storage), or
-    # "docker-cloud" (shared catalog, storage_url required). The single source of truth for
+    # "docker-cloud" (shared catalog, remote storage required). The single source of truth for
     # catalog_url/storage_url below - see IMDB_DUCKLAKE_ENV.
     environment: str = "local"
     catalog_url: str | None = None
-    # Overrides current/storage as the app's read-only DATA_PATH, e.g. an hf://datasets/<repo>
-    # Hugging Face Dataset repo (never hf://buckets/..., DuckDB cannot attach those - ADR 0013).
+    # Overrides current/storage as the app's read-only DATA_PATH: hf://datasets/<repo> or
+    # s3://<bucket>, resolved from IMDB_DUCKLAKE_REMOTE_STORAGE (ADR 0013, 0017).
     storage_url: str | None = None
+    # B2's S3 host for s3:// storage, e.g. s3.us-east-005.backblazeb2.com; the keys come from
+    # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
+    s3_endpoint: str | None = None
     ingest_workers: int = 2
     # Per-build scratch space: dbt's controller DuckDB file (DuckDB spills large sorts/joins into a
     # `.tmp` dir next to it) and dlt's load packages. Defaults to data_dir. `build` empties it
     # before and after each run.
     scratch_dir: Path | None = None
+    # The app copies the `app` schema into memory at startup and then queries it locally, so remote
+    # storage costs one download instead of seconds per interaction (ADR 0016).
+    app_preload: bool = True
 
     @classmethod
     def load(
@@ -67,8 +105,9 @@ class Settings:
         progress_interval_seconds: float | None = None,
         environment: str | None = None,
         catalog_url: str | None = None,
-        storage_url: str | None = None,
+        remote_storage: str | None = None,
         ingest_workers: int | None = None,
+        app_preload: bool | None = None,
     ) -> "Settings":
         root = find_repository_root(repository_root)
         raw_scratch = _env_or_none("IMDB_DUCKLAKE_SCRATCH_DIR")
@@ -120,33 +159,32 @@ class Settings:
                     "IMDB_DUCKLAKE_CATALOG_URL is set but IMDB_DUCKLAKE_ENV is 'local' - "
                     "set IMDB_DUCKLAKE_ENV=docker or docker-cloud to use a shared catalog"
                 )
-            if storage_url is None and _env_or_none("IMDB_DUCKLAKE_STORAGE_URL") is not None:
-                raise ConfigurationError(
-                    "IMDB_DUCKLAKE_STORAGE_URL is set but IMDB_DUCKLAKE_ENV is 'local' - "
-                    "set IMDB_DUCKLAKE_ENV=docker-cloud to read from remote storage"
-                )
             resolved_catalog_url = catalog_url
-            resolved_storage_url = storage_url
         else:
             resolved_catalog_url = (
                 catalog_url
                 or _env_or_none("IMDB_DUCKLAKE_CATALOG_URL")
                 or _default_docker_catalog_url()
             )
-            if configured_environment == "docker":
-                if storage_url is None and _env_or_none("IMDB_DUCKLAKE_STORAGE_URL") is not None:
-                    raise ConfigurationError(
-                        "IMDB_DUCKLAKE_STORAGE_URL is set but IMDB_DUCKLAKE_ENV is 'docker' - "
-                        "set IMDB_DUCKLAKE_ENV=docker-cloud to read from remote storage"
-                    )
-                resolved_storage_url = storage_url
-            else:
-                resolved_storage_url = storage_url or _env_or_none("IMDB_DUCKLAKE_STORAGE_URL")
-                if resolved_storage_url is None:
-                    raise ConfigurationError(
-                        "IMDB_DUCKLAKE_ENV=docker-cloud requires IMDB_DUCKLAKE_STORAGE_URL "
-                        "(e.g. hf://datasets/<you>/<name>)"
-                    )
+
+        # The selector only applies under docker-cloud, so both remotes can stay configured.
+        resolved_storage_url = resolved_s3_endpoint = None
+        if configured_environment == "docker-cloud":
+            raw_remote = remote_storage or _env_or_none("IMDB_DUCKLAKE_REMOTE_STORAGE")
+            configured_remote = raw_remote.strip().lower() if raw_remote else None
+            if configured_remote is None or configured_remote not in _REMOTE_STORAGES:
+                raise ConfigurationError(
+                    "IMDB_DUCKLAKE_ENV=docker-cloud requires IMDB_DUCKLAKE_REMOTE_STORAGE=hf or b2"
+                    + (f", got {configured_remote!r}" if configured_remote else "")
+                )
+            resolved_storage_url, resolved_s3_endpoint = _resolve_remote_storage(configured_remote)
+
+        configured_preload = app_preload
+        if configured_preload is None:
+            raw_preload = environ.get("IMDB_DUCKLAKE_APP_PRELOAD", "true").strip().lower()
+            if raw_preload not in _BOOLEAN_VALUES:
+                raise ConfigurationError("IMDB_DUCKLAKE_APP_PRELOAD must be true or false")
+            configured_preload = _BOOLEAN_VALUES[raw_preload]
 
         return cls(
             repository_root=root,
@@ -157,9 +195,19 @@ class Settings:
             environment=configured_environment,
             catalog_url=resolved_catalog_url,
             storage_url=resolved_storage_url,
+            s3_endpoint=resolved_s3_endpoint,
             ingest_workers=configured_workers,
             scratch_dir=configured_scratch,
+            app_preload=configured_preload,
         )
+
+    @property
+    def s3_region(self) -> str | None:
+        """Signing region, taken from the endpoint (s3.<region>.<host>)."""
+        if self.s3_endpoint is None:
+            return None
+        match = _S3_ENDPOINT_REGION.match(self.s3_endpoint)
+        return match.group(1) if match else None
 
     @property
     def raw_dir(self) -> Path:

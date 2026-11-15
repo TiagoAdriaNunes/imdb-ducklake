@@ -64,14 +64,22 @@ REQUIRED_RELATIONS: dict[str, frozenset[str]] = {
             "mart_genre_year_summary",
             "mart_person_filmography",
             "mart_series_episodes",
-            "mart_title_cast",
             "mart_title_search",
             "mart_top_titles",
-            "mart_top_movies",
-            "mart_top_tv_series",
+        }
+    ),
+    # The Shiny app's serving layer (ADR 0016); query/service.py preloads exactly these.
+    "app": frozenset(
+        {
+            "app_title_cast",
+            "app_title_search",
+            "app_top_movies",
+            "app_top_tv_series",
         }
     ),
 }
+# Schemas whose row counts validation reports, keyed "<schema>.<relation>".
+COUNTED_SCHEMAS = ("marts", "app")
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,13 +249,14 @@ def _validate_read_only(
                 )
 
             mart_row_counts = {}
-            for relation in sorted(REQUIRED_RELATIONS["marts"]):
-                count_row = connection.execute(
-                    f'SELECT count(*) FROM imdb_lake.marts."{relation}"'
-                ).fetchone()
-                if count_row is None:
-                    raise ValidationError(f"Could not count rows in marts.{relation}")
-                mart_row_counts[relation] = int(count_row[0])
+            for schema in COUNTED_SCHEMAS:
+                for relation in sorted(REQUIRED_RELATIONS[schema]):
+                    count_row = connection.execute(
+                        f'SELECT count(*) FROM imdb_lake.{schema}."{relation}"'
+                    ).fetchone()
+                    if count_row is None:
+                        raise ValidationError(f"Could not count rows in {schema}.{relation}")
+                    mart_row_counts[f"{schema}.{relation}"] = int(count_row[0])
             representative_queries = (
                 """
                 select tconst, primary_title, average_rating, genres, directors
@@ -262,10 +271,6 @@ def _validate_read_only(
                 from imdb_lake.marts.mart_person_filmography limit 1
                 """,
                 """
-                select tconst, nconst, category, characters
-                from imdb_lake.marts.mart_title_cast limit 1
-                """,
-                """
                 select series_tconst, episode_tconst, season_number, episode_number
                 from imdb_lake.marts.mart_series_episodes limit 1
                 """,
@@ -274,12 +279,20 @@ def _validate_read_only(
                 from imdb_lake.marts.mart_top_titles limit 1
                 """,
                 """
-                select tconst, primary_title, average_rating, num_votes, title_rank
-                from imdb_lake.marts.mart_top_movies limit 1
+                select tconst, title_type, primary_title, genres_text, directors_text
+                from imdb_lake.app.app_title_search limit 1
+                """,
+                """
+                select tconst, nconst, category, characters_text
+                from imdb_lake.app.app_title_cast limit 1
                 """,
                 """
                 select tconst, primary_title, average_rating, num_votes, title_rank
-                from imdb_lake.marts.mart_top_tv_series limit 1
+                from imdb_lake.app.app_top_movies limit 1
+                """,
+                """
+                select tconst, primary_title, average_rating, num_votes, title_rank
+                from imdb_lake.app.app_top_tv_series limit 1
                 """,
             )
             for query in representative_queries:

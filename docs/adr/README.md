@@ -18,3 +18,5 @@ should add a superseding ADR rather than rewriting history.
 - [0013: Use a Hugging Face Dataset repo, not a Bucket, for storage DuckLake reads directly](0013-hf-dataset-repo-for-remote-storage.md)
 - [0014: Bound disk usage per build](0014-bounded-disk-usage-per-build.md)
 - [0015: Load raw archives as dlt SQL models](0015-raw-archives-as-dlt-sql-models.md)
+- [0016: Serve the app from a dbt `app` schema, preloaded into memory](0016-app-serving-layer.md)
+- [0017: Pick the app's remote storage, Hugging Face or Backblaze B2, with one setting](0017-backblaze-b2-remote-storage.md)

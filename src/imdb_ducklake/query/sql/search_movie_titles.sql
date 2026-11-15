@@ -6,10 +6,10 @@ select
     runtime_minutes as "Runtime (min)",
     average_rating as "Rating",
     num_votes as "Votes",
-    array_to_string(genres, ', ') as "Genres",
-    array_to_string(directors, ', ') as "Directors",
-    array_to_string(writers, ', ') as "Writers"
-from marts.mart_title_search
+    genres_text as "Genres",
+    directors_text as "Directors",
+    writers_text as "Writers"
+from app.app_title_search
 where
     title_type = 'movie'
     and primary_title ilike '%' || '{{ query | replace("'", "''") }}' || '%'

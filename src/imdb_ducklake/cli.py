@@ -402,7 +402,7 @@ def promote_command(
             f"{current_validation.relation_count} current relations read-only."
         )
         for relation, row_count in sorted(current_validation.mart_row_counts.items()):
-            typer.echo(f"  marts.{relation}: {row_count:,} rows")
+            typer.echo(f"  {relation}: {row_count:,} rows")
         if prune:
             retained = "one rollback build" if keep_retired else "no rollback build"
             typer.echo(f"Pruned {len(removed)} obsolete build workspace(s); retained {retained}.")
@@ -470,7 +470,7 @@ def validate_command(
                 )
         typer.echo(f"Validated {result.build_id}: {result.relation_count} required relations.")
         for relation, row_count in sorted(result.mart_row_counts.items()):
-            typer.echo(f"  marts.{relation}: {row_count:,} rows")
+            typer.echo(f"  {relation}: {row_count:,} rows")
     except ImdbLakehouseError as error:
         _exit_with_error(error)
 

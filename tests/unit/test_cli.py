@@ -314,7 +314,7 @@ def test_promote_command_validates_promotes_and_reattaches_current(tmp_path, mon
         events.append("validate current")
         return SimpleNamespace(
             relation_count=31,
-            mart_row_counts={"mart_title_search": 2},
+            mart_row_counts={"marts.mart_title_search": 2},
         )
 
     def fake_prune(received, *, keep_retired):
@@ -364,7 +364,7 @@ def test_promote_command_validates_promotes_and_reattaches_current_postgresql(
         else:
             assert catalog_target.storage_dir == settings.current_dir / "storage"
             events.append("validate current")
-        return SimpleNamespace(relation_count=31, mart_row_counts={"mart_title_search": 2})
+        return SimpleNamespace(relation_count=31, mart_row_counts={"marts.mart_title_search": 2})
 
     def fake_promote(received, *, require_catalog_file=True):
         assert received == paths
@@ -424,7 +424,7 @@ def test_validate_command_automatically_selects_the_only_staged_build(
         return SimpleNamespace(
             build_id="staged-build",
             relation_count=31,
-            mart_row_counts={"mart_title_search": 2},
+            mart_row_counts={"marts.mart_title_search": 2},
         )
 
     monkeypatch.setattr(cli, "validate_catalog", fake_validate)

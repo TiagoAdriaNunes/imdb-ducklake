@@ -89,8 +89,8 @@ help:
 	@echo "  make docker-shell    same, attached to the PostgreSQL-backed catalog (needs docker-up)"
 	@echo "  make docker-shell-ui same, and opens DuckDB's local web UI in your browser"
 	@echo "  make clean-dlt-pipelines  delete old dlt working dirs, keep the newest KEEP=3"
-	@echo "  make upload-dataset  replace the marts in the private HF Dataset repo \$$HF_DATASET_REPO (from .env) with the current build (ADR 0013)"
-	@echo "  make upload-b2       same, to the private Backblaze B2 bucket \$$B2_BUCKET (default imdb-ducklake; keys from .env, DRY=1 to preview)"
+	@echo "  make upload-dataset  replace the app tables in the private HF Dataset repo \$$HF_DATASET_REPO (from .env) with the current build (ADR 0013, 0016)"
+	@echo "  make upload-b2       same, to the private Backblaze B2 bucket \$$B2_BUCKET (from .env, default imdb-ducklake; DRY=1 to preview)"
 
 sync:
 	uv sync --locked
@@ -231,30 +231,31 @@ clean-dlt-pipelines:
 	if [ "$(DRY)" = "1" ]; then echo "(dry run, nothing deleted; rerun without DRY=1)"; exit 0; fi; \
 	echo "$$victims" | xargs -r rm -rf --
 
-# Publishes the promoted marts to a private HF Dataset repo (not a Bucket: DuckDB can't attach
-# hf://buckets/..., ADR 0013). Keeps the marts/ prefix so DATA_PATH can be the repo root.
-# --delete (relative to marts/, uploaded files are spared) drops the previous build's parquet in
+# Publishes the promoted app schema - all the app reads (ADR 0016) - to a private HF Dataset repo
+# (not a Bucket: DuckDB can't attach hf://buckets/..., ADR 0013). Keeps the app/ prefix so
+# DATA_PATH can be the repo root.
+# --delete (relative to app/, uploaded files are spared) drops the previous build's parquet in
 # the same commit, so the repo always mirrors the catalog's current snapshot. Not "*": on Windows
 # hf.exe (Click) globs its own args against the CWD, quoted or not, so a pattern must match no
 # local file - *.parquet matches nothing in the repo root.
 # HF_DATASET_REPO falls back to .env, which Make doesn't load on its own.
 HF_DATASET_REPO ?= $(shell sed -n 's/^HF_DATASET_REPO=//p' .env 2>/dev/null | tr -d '\r"')
-MARTS_DIR := data/ducklake/current/storage/marts
+APP_DIR := data/ducklake/current/storage/app
 upload-dataset:
 	@test -n "$(HF_DATASET_REPO)" || { echo "set HF_DATASET_REPO in .env or the environment, e.g. HF_DATASET_REPO=<you>/<name>"; exit 1; }
-	@test -d "$(MARTS_DIR)" || { echo "no promoted marts at $(MARTS_DIR) - run a build first"; exit 1; }
+	@test -d "$(APP_DIR)" || { echo "no promoted app tables at $(APP_DIR) - run a build first"; exit 1; }
 	@hf auth whoami >/dev/null 2>&1 || { echo "not logged in to Hugging Face - run: hf auth login"; exit 1; }
-	hf upload $(HF_DATASET_REPO) ./$(MARTS_DIR) marts --type dataset --private --delete "*.parquet" \
-		--commit-message "Replace marts with build of $$(date -u +%Y-%m-%dT%H:%MZ)" $(ARGS)
+	hf upload $(HF_DATASET_REPO) ./$(APP_DIR) app --type dataset --private --delete "*.parquet" \
+		--commit-message "Replace app tables with build of $$(date -u +%Y-%m-%dT%H:%MZ)" $(ARGS)
 
-# Same marts/ layout to a private Backblaze B2 bucket; --delete drops the previous build's parquet.
+# Same app/ layout to a private Backblaze B2 bucket; --delete drops the previous build's parquet.
 # Keys are read from .env inside the recipe so they never appear in make's echoed command.
-# DRY=1 previews the sync without changing the bucket.
-B2_BUCKET ?= imdb-ducklake
+# DRY=1 previews the sync without changing the bucket. B2_BUCKET falls back to .env, then imdb-ducklake.
+B2_BUCKET ?= $(or $(shell sed -n 's/^B2_BUCKET=//p' .env 2>/dev/null | tr -d '\r"'),imdb-ducklake)
 upload-b2:
-	@test -d "$(MARTS_DIR)" || { echo "no promoted marts at $(MARTS_DIR) - run a build first"; exit 1; }
+	@test -d "$(APP_DIR)" || { echo "no promoted app tables at $(APP_DIR) - run a build first"; exit 1; }
 	@grep -q '^BLAZE_KEY_ID=.' .env && grep -q '^BLAZE_TOKEN=.' .env || { echo "set BLAZE_KEY_ID and BLAZE_TOKEN in .env"; exit 1; }
 	B2_APPLICATION_KEY_ID="$$(sed -n 's/^BLAZE_KEY_ID=//p' .env | tr -d '\r"')" \
 	B2_APPLICATION_KEY="$$(sed -n 's/^BLAZE_TOKEN=//p' .env | tr -d '\r"')" \
 		uvx --from b2 b2 sync --delete --no-progress $(if $(filter 1,$(DRY)),--dry-run) \
-		./$(MARTS_DIR) b2://$(B2_BUCKET)/marts $(ARGS)
+		./$(APP_DIR) b2://$(B2_BUCKET)/app $(ARGS)

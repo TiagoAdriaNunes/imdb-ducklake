@@ -8,10 +8,10 @@ select
     titles.episode_count as "Episodes",
     titles.average_rating as "Rating",
     titles.num_votes as "Votes",
-    array_to_string(titles.genres, ', ') as "Genres",
-    array_to_string(titles.directors, ', ') as "Directors",
-    array_to_string(titles.writers, ', ') as "Writers"
-from marts.mart_title_search as titles
+    titles.genres_text as "Genres",
+    titles.directors_text as "Directors",
+    titles.writers_text as "Writers"
+from app.app_title_search as titles
 where
     titles.title_type = 'tvSeries'
     and titles.primary_title ilike '%' || '{{ query | replace("'", "''") }}' || '%'

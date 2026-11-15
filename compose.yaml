@@ -56,17 +56,25 @@ services:
         condition: service_healthy
     command: ["app"]
     environment:
-      # docker-cloud instead of docker in your .env additionally requires IMDB_DUCKLAKE_STORAGE_URL
-      # to be set (enforced by Settings.load) rather than silently falling back to local storage.
+      # docker-cloud instead of docker in your .env additionally requires IMDB_DUCKLAKE_REMOTE_STORAGE
+      # (hf or b2, enforced by Settings.load) rather than silently falling back to local storage.
       IMDB_DUCKLAKE_ENV: ${IMDB_DUCKLAKE_ENV:-docker}
       IMDB_DUCKLAKE_CATALOG_URL: ${IMDB_DUCKLAKE_CATALOG_URL:-postgresql://imdb:imdb-local-dev@postgres:5432/ducklake_catalog}
       IMDB_DUCKLAKE_QUERY_THREADS: ${IMDB_DUCKLAKE_QUERY_THREADS:-2}
       IMDB_DUCKLAKE_APP_PORT: 8000
-      # Reads marts from this Hugging Face Dataset repo (see ADR 0013) instead of local
-      # current/storage when set. HF_TOKEN authenticates DuckDB's credential_chain provider
-      # against the private repo - the container has no access to a host `hf auth login` cache.
-      IMDB_DUCKLAKE_STORAGE_URL: ${IMDB_DUCKLAKE_STORAGE_URL:-}
+      # Under docker-cloud, reads the app tables from hf (HF_DATASET_REPO, ADR 0013) or b2
+      # (B2_BUCKET at BLAZE_ENDPOINT, ADR 0017) instead of local current/storage.
+      # HF_TOKEN authenticates the private HF repo - the container has no host `hf auth login`.
+      IMDB_DUCKLAKE_REMOTE_STORAGE: ${IMDB_DUCKLAKE_REMOTE_STORAGE:-}
+      HF_DATASET_REPO: ${HF_DATASET_REPO:-}
       HF_TOKEN: ${HF_TOKEN:-}
+      B2_BUCKET: ${B2_BUCKET:-}
+      BLAZE_ENDPOINT: ${BLAZE_ENDPOINT:-}
+      # DuckDB's S3 secret reads the B2 key from these, so it never appears in SQL.
+      AWS_ACCESS_KEY_ID: ${BLAZE_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BLAZE_TOKEN:-}
+      # Copy the app tables into memory at startup (ADR 0016); false queries storage directly.
+      IMDB_DUCKLAKE_APP_PRELOAD: ${IMDB_DUCKLAKE_APP_PRELOAD:-true}
     ports:
       - "${IMDB_DUCKLAKE_APP_PORT:-8000}:8000"
     volumes:

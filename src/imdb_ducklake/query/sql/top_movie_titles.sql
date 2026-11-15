@@ -9,5 +9,5 @@ select
     genres_text as "Genres",
     directors_text as "Directors",
     writers_text as "Writers"
-from marts.mart_top_movies
+from app.app_top_movies
 order by title_rank

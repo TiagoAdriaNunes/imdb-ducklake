@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from itables.shiny import init_itables
-from modules.home import titles_server, titles_ui
+from modules.home import titles_server, titles_ui, warm_up
 from shiny import App, ui
 
 _APP_ROOT = Path(__file__).resolve().parent
@@ -34,3 +34,4 @@ def server(input, output, session):
 
 
 app = App(app_ui, server)
+warm_up()
