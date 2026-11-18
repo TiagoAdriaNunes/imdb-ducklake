@@ -131,6 +131,9 @@ the remote copy must come from the same build. Keep both remotes configured in `
 one with `IMDB_DUCKLAKE_REMOTE_STORAGE`. It reads the same values the upload targets use, so the
 app always reads what you published:
 
+The `lakehouse` service always uses the `docker` profile to build against local `./data` storage.
+The `.env` profile selects where the `app` service reads after you publish the build.
+
 | `IMDB_DUCKLAKE_REMOTE_STORAGE` | Reads | Settings in `.env` | Publish with |
 | --- | --- | --- | --- |
 | `hf` ([ADR 0013](docs/adr/0013-hf-dataset-repo-for-remote-storage.md)) | `hf://datasets/$HF_DATASET_REPO` | `HF_DATASET_REPO`, `HF_TOKEN` | `make upload-dataset` |

@@ -29,7 +29,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      IMDB_DUCKLAKE_ENV: ${IMDB_DUCKLAKE_ENV:-docker}
+      # Pipeline builds write to ./data; docker-cloud is for the app after upload.
+      IMDB_DUCKLAKE_ENV: docker
       IMDB_DUCKLAKE_CATALOG_URL: ${IMDB_DUCKLAKE_CATALOG_URL:-postgresql://imdb:imdb-local-dev@postgres:5432/ducklake_catalog}
       IMDB_DUCKLAKE_DBT_THREADS: ${IMDB_DUCKLAKE_DBT_THREADS:-2}
       IMDB_DUCKLAKE_QUERY_THREADS: ${IMDB_DUCKLAKE_QUERY_THREADS:-2}
