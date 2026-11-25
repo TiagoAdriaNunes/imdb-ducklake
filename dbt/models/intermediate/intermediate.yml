@@ -45,8 +45,9 @@ models:
         data_tests:
           - not_null
           - unique
+          # IMDb exports title.episode after title.basics, so new episodes can lag (0.013% on 2026-11-25).
           - relationships_with_max_orphan_ratio:
-              arguments: {to: "ref('dim_titles')", field: tconst}
+              arguments: {to: "ref('dim_titles')", field: tconst, max_orphan_ratio: 0.001}
       - name: parent_tconst
         description: Parent series title key.
         data_tests:

@@ -367,7 +367,8 @@ make transform
 
 The command builds the `staging`, `intermediate`, `marts`, and `app` schemas and prints dbt's complete
 result. Known sparse IMDb relationship gaps are measured as ratios and fail the build if they
-exceed 0.01%; they are not patched in the source data. Large title-search arrays are materialized
+exceed 0.01% (0.1% for episode → title, since IMDb's episode export can list episodes newer than
+`title.basics`); they are not patched in the source data. Large title-search arrays are materialized
 as separate rollups to keep peak DuckDB memory bounded. If more than one staged build exists,
 select the build ID printed by ingestion:
 
